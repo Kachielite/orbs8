@@ -96,6 +96,21 @@ export class AuthService {
     }
   }
 
+  async getUserById(id: number): Promise<User> {
+    try {
+      const user = await this.userRepository.findOne({ where: { id } });
+      if (!user) {
+        throw new NotFoundException(`User with ID ${id} not found`);
+      }
+      return user;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('An error occurred while fetching user');
+    }
+  }
+
   private async checkUserExists(email: string): Promise<User | null> {
     return await this.userRepository.findOne({ where: { email } });
   }
