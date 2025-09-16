@@ -3,9 +3,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { DbConfigModule } from '../common/configurations/db.config';
 import { AppConfigModule } from '../common/configurations/app.config';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [DbConfigModule, AppConfigModule],
+  imports: [DbConfigModule, AppConfigModule, AuthModule],
   controllers: [AppController],
   providers: [AppService],
 })
