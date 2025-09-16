@@ -1,3 +1,10 @@
+import { ApiProperty } from '@nestjs/swagger';
+
 export class GeneralResponseDto {
-  constructor(public message: string) {}
+  @ApiProperty({ description: 'The message of the response' })
+  public message: string;
+
+  constructor(message: string) {
+    this.message = message;
+  }
 }
