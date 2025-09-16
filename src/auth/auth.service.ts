@@ -77,7 +77,11 @@ export class AuthService {
       logger.info(`User with email ${request.email} logged in successfully`);
       return new AuthResponseDto('Login successful', accessToken, refreshToken);
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof ConflictException) {
+      if (
+        error instanceof NotFoundException ||
+        error instanceof ConflictException ||
+        error instanceof UnauthorizedException
+      ) {
         throw error;
       }
       logger.error(`Error logging in user with email ${request.email}: ${error.message}`);
@@ -87,7 +91,7 @@ export class AuthService {
 
   async refreshToken(refreshToken: string): Promise<AuthResponseDto> {
     try {
-      logger.info(`Refreshing token for user with refresh token: ${refreshToken}`);
+      logger.info(`Refreshing token for user with refresh token: ${refreshToken.substring(0, 20)}`);
       const payload: { sub: number } = this.jwtService.verify(refreshToken, {
         secret: constats.JWT_REFRESH_SECRET,
       });
