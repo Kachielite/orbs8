@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -7,28 +7,214 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { JwtGuard } from './guards/jwt.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { UserResponseDto } from './dto/user-response.dto';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 
-@ApiTags('auth')
+@ApiTags('Authentication')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
+  @ApiOperation({
+    summary: 'Register a new user',
+    description: 'Creates a new user account with the provided name, email, and password.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Registration successful, please login',
+    type: GeneralResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid input data',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'array',
+          items: { type: 'string' },
+          example: [
+            'Name must be at least 3 characters long',
+            'Email must be a valid email address',
+            'Password must be at least 8 characters long',
+          ],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - User already exists',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 409 },
+        message: { type: 'string', example: 'User with email example@email.com already exists' },
+        error: { type: 'string', example: 'Conflict' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during registration' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
   @Post('register')
+  @HttpCode(201)
   async register(@Body() request: RegisterDto): Promise<GeneralResponseDto> {
     return await this.authService.register(request);
   }
 
+  @ApiOperation({
+    summary: 'Login user',
+    description:
+      'Authenticates a user with email and password and returns access and refresh tokens.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid input data',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'array',
+          items: { type: 'string' },
+          example: [
+            'Email must be a valid email address',
+            'Password must be at least 8 characters long',
+          ],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Not Found - User not found',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'User with email example@email.com not found' },
+        error: { type: 'string', example: 'Not Found' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid credentials',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Invalid credentials' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during login' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
   @Post('login')
   async login(@Body() request: LoginDto): Promise<AuthResponseDto> {
     return await this.authService.login(request);
   }
 
+  @ApiOperation({
+    summary: 'Refresh access token',
+    description: 'Generates new access and refresh tokens using a valid refresh token',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Token refresh successful',
+    type: AuthResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid refresh token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Invalid refresh token' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during token refresh' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
   @Post('refresh-token')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        refreshToken: {
+          type: 'string',
+          description: 'The refresh token to be used for generating new tokens',
+          example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+        },
+      },
+      required: ['refreshToken'],
+    },
+  })
   async refreshToken(@Body('refreshToken') refreshToken: string): Promise<AuthResponseDto> {
     return await this.authService.refreshToken(refreshToken);
   }
 
+  @ApiOperation({
+    summary: 'Get current user information',
+    description: 'Returns details of the currently authenticated user',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User information retrieved successfully',
+    type: UserResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing JWT token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiBearerAuth()
   @Get('me')
   @UseGuards(JwtGuard)
   getCurrentUser(@CurrentUser() user: UserResponseDto): UserResponseDto {
