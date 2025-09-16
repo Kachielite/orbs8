@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 
 export enum EmailProvider {
@@ -11,7 +18,7 @@ export class Email {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @ManyToOne(() => User, (user) => user.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
   user: User;
 
   @Column({
@@ -24,15 +31,21 @@ export class Email {
   @Column()
   accessToken: string;
 
-  @Column()
-  refreshToken: string;
+  @Column({ nullable: true })
+  refreshToken: string | null;
 
   @Column()
   expiresAt: Date;
 
+  @Column({ nullable: true })
+  lastSyncAt: Date;
+
+  @Column({ default: 0 })
+  emailsReceived: number;
+
   @CreateDateColumn()
   createdAt: Date;
 
-  @CreateDateColumn()
+  @UpdateDateColumn()
   updatedAt: Date;
 }
