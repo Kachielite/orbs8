@@ -4,7 +4,7 @@ import { BullModule } from '@nestjs/bullmq';
 @Module({
   imports: [
     BullModule.forRoot({ connection: { host: 'localhost', port: 6379 } }),
-    BullModule.registerQueue({ name: 'email' }),
+    BullModule.registerQueue({ name: 'email-sync' }),
   ],
 })
 export class BullmqConfigModule {}

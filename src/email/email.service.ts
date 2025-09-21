@@ -9,6 +9,7 @@ import { Email, EmailProvider } from './entities/email.entity';
 import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
+import { InjectQueue } from '@nestjs/bullmq';
 
 @Injectable()
 export class EmailService {
@@ -22,6 +23,7 @@ export class EmailService {
   constructor(
     @InjectRepository(Email)
     private readonly emailRepository: Repository<Email>,
+    @InjectQueue('email-sync') private readonly emailSyncQueue: any,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
       constats.GOOGLE_CLIENT_ID,
@@ -105,6 +107,17 @@ export class EmailService {
     } catch (error) {
       logger.error(`Failed to get sync status: ${error.message}`);
       throw new InternalServerErrorException(`Failed to get sync status: ${error.message}`);
+    }
+  }
+
+  async manualSync(user: User): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Manual sync initiated for user: ${user.id}`);
+      await this.emailSyncQueue.add('sync-emails', { userId: user.id });
+      return new GeneralResponseDto('Manual sync initiated successfully');
+    } catch (error) {
+      logger.error(`Failed to initiate manual sync: ${error.message}`);
+      throw new InternalServerErrorException(`Failed to initiate manual sync: ${error.message}`);
     }
   }
 }
