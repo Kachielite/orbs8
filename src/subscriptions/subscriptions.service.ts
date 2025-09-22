@@ -1,14 +1,20 @@
-import { Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException, } from '@nestjs/common';
-import { CreateSubscriptionDto } from './dto/create-subscription.dto';
-import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
-import { Subscription } from './entities/subscription.entity';
+
 import { User } from '../auth/entities/user.entity';
-import logger from '../common/utils/logger/logger';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
-import { GetSubscriptionQuery } from './interface/get-subscription-query';
+import logger from '../common/utils/logger/logger';
+import { CreateSubscriptionDto } from './dto/create-subscription.dto';
 import { SubscriptionDto, SubscriptionsResponseDto } from './dto/subscriptions.dto';
+import { UpdateSubscriptionDto } from './dto/update-subscription.dto';
+import { Subscription } from './entities/subscription.entity';
+import { GetSubscriptionQuery } from './interface/get-subscription-query';
 
 @Injectable()
 export class SubscriptionsService {
@@ -52,7 +58,10 @@ export class SubscriptionsService {
     }
   }
 
-  async findAll(query: GetSubscriptionQuery): Promise<SubscriptionsResponseDto> {
+  async findAll(
+    query: GetSubscriptionQuery,
+    user: Partial<User>,
+  ): Promise<SubscriptionsResponseDto> {
     const { page, limit, search } = query;
 
     const safePage = Math.max(1, Number(page) || 1);
@@ -80,7 +89,10 @@ export class SubscriptionsService {
     logger.info(`Fetching subscriptions with query: ${JSON.stringify(query)}`);
     try {
       const [subscriptions, total] = await this.subscriptionRepository.findAndCount({
-        where: search ? { serviceName: ILike(`%${search}%`) } : {},
+        where: {
+          ...(search ? { serviceName: ILike(`%${search}%`) } : {}),
+          user: { id: user.id },
+        },
         relations: ['user'],
         skip,
         take,
