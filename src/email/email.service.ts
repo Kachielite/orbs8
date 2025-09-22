@@ -10,6 +10,8 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { EmailSyncStatus } from './entities/email-sync-status.enum';
 
 @Injectable()
 export class EmailService {
@@ -23,6 +25,8 @@ export class EmailService {
   constructor(
     @InjectRepository(Email)
     private readonly emailRepository: Repository<Email>,
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
     @InjectQueue('email-sync') private readonly emailSyncQueue: any,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
@@ -113,11 +117,53 @@ export class EmailService {
   async manualSync(user: User): Promise<GeneralResponseDto> {
     try {
       logger.info(`Manual sync initiated for user: ${user.id}`);
+      // Set syncStatus to PENDING before queuing the job
+      await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
+      // Add job to the queue
       await this.emailSyncQueue.add('sync-emails', { userId: user.id });
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
+      await this.updateSyncStatus(user, EmailSyncStatus.FAILED, error.message);
       logger.error(`Failed to initiate manual sync: ${error.message}`);
       throw new InternalServerErrorException(`Failed to initiate manual sync: ${error.message}`);
     }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async scheduledSync() {
+    logger.info('Scheduled sync started');
+    const users = await this.userRepository.find();
+    for (const user of users) {
+      try {
+        // Set syncStatus to PENDING before queuing the job
+        await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
+        await this.emailSyncQueue.add('sync-emails', { userId: user.id });
+        logger.info(`Scheduled sync queued for user: ${user.id}`);
+      } catch (err) {
+        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, err.message);
+        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${err.message}`);
+        throw new InternalServerErrorException(
+          `Failed to queue scheduled sync for user ${user.id}: ${err.message}`,
+        );
+      }
+    }
+    logger.info('Scheduled sync completed');
+  }
+
+  private async updateSyncStatus(
+    user: User,
+    status: EmailSyncStatus,
+    failedReason?: string,
+  ): Promise<void> {
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: user },
+      relations: ['user'],
+    });
+    if (emailEntity) {
+      emailEntity.syncStatus = status;
+      emailEntity.failedReason = failedReason ?? null;
+      await this.emailRepository.save(emailEntity);
+    }
+    return;
   }
 }

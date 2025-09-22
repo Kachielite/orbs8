@@ -13,6 +13,14 @@ export enum EmailProvider {
   OUTLOOK = 'outlook',
 }
 
+export enum EmailSyncStatus {
+  IDLE = 'idle',
+  PENDING = 'pending',
+  IN_PROGRESS = 'in_progress',
+  COMPLETED = 'completed',
+  FAILED = 'failed',
+}
+
 @Entity()
 export class Email {
   @PrimaryGeneratedColumn()
@@ -42,6 +50,16 @@ export class Email {
 
   @Column({ default: 0 })
   emailsReceived: number;
+
+  @Column({
+    type: 'enum',
+    enum: EmailSyncStatus,
+    default: EmailSyncStatus.IDLE,
+  })
+  syncStatus: EmailSyncStatus;
+
+  @Column({ nullable: true })
+  failedReason: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

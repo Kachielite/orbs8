@@ -2,7 +2,7 @@ import { OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Email } from './entities/email.entity';
+import { Email, EmailSyncStatus } from './entities/email.entity';
 import { User } from '../auth/entities/user.entity';
 import { gmail_v1, google } from 'googleapis';
 import { envConstants } from '../common/constants/env.secrets';
@@ -119,14 +119,31 @@ export class EmailWorker extends WorkerHost {
       await job.updateProgress(progress);
     }
     logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
+
+    // 7. update last sync and email received
+    logger.info(`Updating last sync and email received for user ${user.id}`);
+    emailEntity.lastSyncAt = new Date();
+    emailEntity.emailsReceived = messages.length;
+    await this.emailRepository.save(emailEntity);
     // 6. Save or process results as needed
     // await this.saveExtractedSubscriptions(results);
     return results;
   }
 
   @OnWorkerEvent('active')
-  onActive(job: Job) {
+  async onActive(job: Job) {
     logger.info(`Job ${job.id} is active`);
+    const userId = (job.data as JobPayloadInterface).userId;
+    const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
+    if (!user) return;
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: user },
+      relations: ['user'],
+    });
+    if (!emailEntity) return;
+    emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;
+    emailEntity.failedReason = null;
+    await this.emailRepository.save(emailEntity);
   }
 
   @OnWorkerEvent('progress')
@@ -135,13 +152,35 @@ export class EmailWorker extends WorkerHost {
   }
 
   @OnWorkerEvent('completed')
-  onCompleted(job: Job) {
+  async onCompleted(job: Job) {
     logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
+    const userId = (job.data as JobPayloadInterface).userId;
+    const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
+    if (!user) return;
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: user },
+      relations: ['user'],
+    });
+    if (!emailEntity) return;
+    emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
+    emailEntity.failedReason = null;
+    await this.emailRepository.save(emailEntity);
   }
 
   @OnWorkerEvent('failed')
-  onFailed(job: Job, err: Error) {
+  async onFailed(job: Job, err: Error) {
     logger.error(`Job ${job.id} failed with error ${err.message}`);
+    const userId = (job.data as JobPayloadInterface).userId;
+    const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
+    if (!user) return;
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: user },
+      relations: ['user'],
+    });
+    if (!emailEntity) return;
+    emailEntity.syncStatus = EmailSyncStatus.FAILED;
+    emailEntity.failedReason = err.message;
+    await this.emailRepository.save(emailEntity);
   }
 
   // Improved parser: uses general regexes to extract fields from subject and body
