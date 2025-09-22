@@ -12,7 +12,6 @@ import { BullModule } from '@nestjs/bullmq';
         backoff: 2000, // Wait at least 2 seconds before attempting the job again, after failure
       },
     }),
-    BullModule.registerQueue({ name: 'email-sync' }),
   ],
 })
 export class BullmqConfigModule {}

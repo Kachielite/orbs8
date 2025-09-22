@@ -39,7 +39,7 @@ export class Email {
   @Column()
   accessToken: string;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   refreshToken: string | null;
 
   @Column()
@@ -58,7 +58,7 @@ export class Email {
   })
   syncStatus: EmailSyncStatus;
 
-  @Column({ nullable: true })
+  @Column({ type: 'text', nullable: true })
   failedReason: string | null;
 
   @CreateDateColumn()

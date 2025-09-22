@@ -5,13 +5,12 @@ import { OAuth2Client } from 'google-auth-library';
 import logger from '../common/utils/logger/logger';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Email, EmailProvider } from './entities/email.entity';
+import { Email, EmailProvider, EmailSyncStatus } from './entities/email.entity';
 import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { EmailSyncStatus } from './entities/email-sync-status.enum';
 
 @Injectable()
 export class EmailService {
@@ -50,7 +49,7 @@ export class EmailService {
     }
   }
 
-  async getToken(code: string, user: User): Promise<GeneralResponseDto> {
+  async getToken(code: string, user: Partial<User>): Promise<GeneralResponseDto> {
     try {
       logger.info('Obtaining Gmail access');
       const accessData = await this.oauth2Client.getToken(code);
@@ -89,7 +88,7 @@ export class EmailService {
     }
   }
 
-  async getSyncStatus(user: User): Promise<StatusDto> {
+  async getSyncStatus(user: Partial<User>): Promise<StatusDto> {
     try {
       logger.info(`Getting sync status for user: ${user.id}`);
 
@@ -102,12 +101,10 @@ export class EmailService {
 
       if (!source) {
         logger.error(`Sync status not found for user: ${user.id}`);
-        return new StatusDto(false);
+        return new StatusDto(EmailSyncStatus.IDLE);
       }
 
-      const connection = !!source.accessToken && !!source.refreshToken;
-
-      return new StatusDto(connection, source.emailsReceived, source.lastSyncAt);
+      return new StatusDto(source.syncStatus, source.emailsReceived, source.lastSyncAt);
     } catch (error) {
       logger.error(`Failed to get sync status: ${error.message}`);
       throw new InternalServerErrorException(`Failed to get sync status: ${error.message}`);

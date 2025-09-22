@@ -6,6 +6,8 @@ import { AppConfigModule } from '../common/configurations/app.config';
 import { AuthModule } from '../auth/auth.module';
 import { BullmqConfigModule } from '../common/configurations/bullmq.config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { EmailController } from '../email/email.controller';
+import { EmailModule } from '../email/email.module';
 
 @Module({
   imports: [
@@ -14,8 +16,9 @@ import { ScheduleModule } from '@nestjs/schedule';
     AuthModule,
     BullmqConfigModule,
     ScheduleModule.forRoot(),
+    EmailModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, EmailController],
   providers: [AppService],
 })
 export class AppModule {}
