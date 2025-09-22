@@ -19,12 +19,7 @@ const myFormat = printf(
 );
 
 const logger = winston.createLogger({
-  format: combine(
-    colorize(),
-    label({ label: 'ORBS8 🛰️' }),
-    timestamp(),
-    myFormat,
-  ),
+  format: combine(colorize(), label({ label: 'ORBS8 🛰️' }), timestamp(), myFormat),
   transports: [
     new winston.transports.Console(),
     new winston.transports.File({

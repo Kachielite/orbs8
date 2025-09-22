@@ -1,8 +1,8 @@
 import {
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
@@ -178,7 +178,7 @@ export class SubscriptionsService {
       }
 
       if (subscription.user.id !== fullUserDetails.id) {
-        throw new UnauthorizedException('Only the owner of the subscription can update it.');
+        throw new ForbiddenException('Only the owner of the subscription can update it.');
       }
 
       const updatedSubscription = this.subscriptionRepository.merge(
@@ -222,7 +222,7 @@ export class SubscriptionsService {
       }
 
       if (subscription.user.id !== fullUserDetails.id) {
-        throw new UnauthorizedException('Only the owner of the subscription can delete it.');
+        throw new ForbiddenException('Only the owner of the subscription can delete it.');
       }
 
       await this.subscriptionRepository.remove(subscription);

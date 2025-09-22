@@ -7,9 +7,7 @@ export class WinstonLogger implements LoggerService {
   }
 
   error(message: any, trace?: string, context?: string) {
-    logger.error(
-      this.formatMessage(message, context) + (trace ? `\n${trace}` : ''),
-    );
+    logger.error(this.formatMessage(message, context) + (trace ? `\n${trace}` : ''));
   }
 
   warn(message: any, context?: string) {
