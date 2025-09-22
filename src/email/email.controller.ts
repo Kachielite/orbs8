@@ -12,9 +12,9 @@ import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagg
 export class EmailController {
   constructor(private readonly emailService: EmailService) {}
 
-  @ApiBearerAuth()
+  // @ApiBearerAuth()
   @Get('get-auth')
-  @UseGuards(JwtGuard)
+  // @UseGuards(JwtGuard)
   @ApiOperation({
     summary: 'Get Google OAuth URL',
     description: 'Returns the Google OAuth URL for Gmail authentication',
