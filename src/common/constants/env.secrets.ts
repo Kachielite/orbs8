@@ -1,4 +1,4 @@
-export const constats = {
+export const envConstants = {
   DB_HOST: process.env.DB_HOST as string,
   DB_PORT: process.env.DB_PORT,
   DB_USERNAME: process.env.DB_USERNAME,

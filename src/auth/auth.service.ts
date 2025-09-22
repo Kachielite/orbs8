@@ -12,7 +12,7 @@ import { RegisterDto } from './dto/register.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
-import { constats } from '../common/constants/env.secrets';
+import { envConstants } from '../common/constants/env.secrets';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import logger from '../common/utils/logger/logger';
@@ -93,7 +93,7 @@ export class AuthService {
     try {
       logger.info(`Refreshing token for user with refresh token: ${refreshToken.substring(0, 20)}`);
       const payload: { sub: number } = this.jwtService.verify(refreshToken, {
-        secret: constats.JWT_REFRESH_SECRET,
+        secret: envConstants.JWT_REFRESH_SECRET,
       });
 
       const user = await this.userRepository.findOne({ where: { id: payload.sub } });
@@ -154,13 +154,13 @@ export class AuthService {
 
     if (type === 'access') {
       return this.jwtService.sign(payload, {
-        secret: constats.JWT_ACCESS_SECRET,
+        secret: envConstants.JWT_ACCESS_SECRET,
         expiresIn: '1d',
       });
     }
 
     return this.jwtService.sign(payload, {
-      secret: constats.JWT_REFRESH_SECRET,
+      secret: envConstants.JWT_REFRESH_SECRET,
       expiresIn: '7d',
     });
   }

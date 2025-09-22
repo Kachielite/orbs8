@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { google } from 'googleapis';
-import { constats } from '../common/constants/env.secrets';
+import { envConstants } from '../common/constants/env.secrets';
 import { OAuth2Client } from 'google-auth-library';
 import logger from '../common/utils/logger/logger';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
@@ -26,9 +26,9 @@ export class EmailService {
     @InjectQueue('email-sync') private readonly emailSyncQueue: any,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
-      constats.GOOGLE_CLIENT_ID,
-      constats.GOOGLE_CLIENT_SECRET,
-      constats.GOOGLE_REDIRECT_URI,
+      envConstants.GOOGLE_CLIENT_ID,
+      envConstants.GOOGLE_CLIENT_SECRET,
+      envConstants.GOOGLE_REDIRECT_URI,
     );
   }
 
