@@ -8,6 +8,7 @@ import { BullmqConfigModule } from '../common/configurations/bullmq.config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EmailModule } from '../email/email.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
+import { MailConfigModule } from '../common/configurations/mail.config';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
     ScheduleModule.forRoot(),
     EmailModule,
     SubscriptionsModule,
+    MailConfigModule,
   ],
   controllers: [AppController],
   providers: [AppService],
