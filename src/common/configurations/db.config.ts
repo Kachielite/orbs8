@@ -4,6 +4,7 @@ import { User } from '../../auth/entities/user.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Email } from '../../email/entities/email.entity';
 import { Subscription } from '../../subscriptions/entities/subscription.entity';
+import { Token } from '../../tokens/entities/token.entity';
 
 @Module({
   imports: [
@@ -17,7 +18,7 @@ import { Subscription } from '../../subscriptions/entities/subscription.entity';
         username: configService.get('DB_USERNAME'),
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
-        entities: [User, Email, Subscription],
+        entities: [User, Email, Subscription, Token],
         autoLoadEntities: true,
         synchronize: true,
       }),
