@@ -1,98 +1,139 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Subscription Tracker — Backend (NestJS + Postgres)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+This service powers subscription discovery and management by reading subscription-related emails (Gmail first), extracting only the required data, and preserving user privacy and transparency.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+Status: MVP in progress. New modules will be added as the project evolves.
 
-## Description
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## MVP goals and success criteria
 
-## Project setup
+Primary user problem: Automatically discover and organize recurring subscriptions by reading subscription emails so users can understand how many subscriptions they have (active/paused/cancelled), how much they spend, and get suggestions (e.g., consolidate duplicates). We must never store full email content and be transparent about what we read and why.
 
-```bash
-$ npm install
-```
+MVP success criteria:
+- Users can connect their Gmail account and grant limited access for subscription discovery.
+- The app identifies subscription-related emails and extracts structured subscription records (service/vendor, price, currency, billing cadence, next payment date, status) without storing raw email bodies.
+- UI (out of scope in this repo) will show: total subscriptions by status, monthly/annual spend, and suggestions (e.g., duplicate services).
+- Privacy & transparency features: consent screen, a privacy dashboard showing number of emails scanned, last sync time, per-extraction confidence, and the reason/evidence for an extraction in redacted or rule-based form. Users can delete extracted data and revoke Gmail access at any time.
+- Extraction pipeline is deterministic first (regex + vendor heuristics) with an optional LLM fallback for ambiguous emails (LLM only with explicit user opt-in and documented data handling).
+- Gmail tokens/credentials are encrypted at rest, and we store only minimum metadata (hashed message IDs) for deduplication.
+- Scheduled syncs (background worker) and on-demand sync.
 
-## Compile and run the project
 
-```bash
-# development
-$ npm run start
+## High-level architecture
 
-# watch mode
-$ npm run start:dev
+Stack: NestJS, PostgreSQL, optional Redis (BullMQ) for background jobs/queues.
 
-# production mode
-$ npm run start:prod
-```
+Textual flow:
+User (web/mobile) -> Auth/Consent UI -> API (EmailConnector) -> Gmail API (OAuth)
+                                   -> EmailFetcher Job -> EmailProcessor -> Extraction results stored in Postgres
+                                   -> Background worker -> Notifications/Analytics
 
-## Run tests
+Privacy variants:
+- Server-side (MVP default): Server holds encrypted refresh tokens, fetches labeled emails, parses in-memory, stores only extracted fields + hashed message IDs.
+- Client-side (future option): Browser/mobile uses Gmail API directly (OAuth) and runs extraction locally; only extracted records are sent to server.
 
-```bash
-# unit tests
-$ npm run test
 
-# e2e tests
-$ npm run test:e2e
+## Modules (current and planned)
 
-# test coverage
-$ npm run test:cov
-```
+Existing in this repository (as of now):
+- Auth: user registration, login, JWT, current user endpoint. See src/auth.
+- Email (EmailConnector): Gmail OAuth flow and sync status + manual sync. See src/email.
+- Subscriptions: CRUD/representation of extracted subscription entries. See src/subscriptions.
 
-## Deployment
+Planned modules to be added incrementally:
+- EmailProcessor: deterministic parsing pipeline (regex, vendor heuristics) to detect subscriptions in email metadata/snippets.
+- Extraction: persistence of structured outputs and audit trails. No raw email bodies, only extracted fields + hashed message IDs.
+- Notifications: user-facing alerts (e.g., new subscription detected, upcoming charge).
+- Analytics: aggregates for monthly/annual spend, status breakdown, and suggestions (e.g., duplicate service consolidation).
+- Background worker: BullMQ queues (fetch -> parse -> extract) with retries and observability.
+- LLM Fallback (optional): invoked only when deterministic parsing is ambiguous and only with explicit user opt‑in to privacy terms.
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+Note: New modules will be added as the project is still under development. Names and boundaries may evolve.
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+## Data privacy & handling principles
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+- Do not store raw email bodies or full message content.
+- Store minimum metadata for deduplication (e.g., hashed Gmail message IDs, labels, dates).
+- Keep Gmail refresh tokens encrypted at rest; limit scopes to what’s necessary for reading relevant messages.
+- Provide transparency metadata: number of emails scanned, last sync, extraction confidence, and reason/evidence for extraction (redacted/rule-based form).
+- Allow users to delete extracted data and revoke Gmail access at any time.
+- LLM usage is opt-in only, documented, and isolated to redacted content where possible. Prefer enterprise providers with no training/retention.
 
-## Resources
 
-Check out a few resources that may come in handy when working with NestJS:
+## Database (PostgreSQL)
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+- Tables (conceptual): users, subscriptions, extractions, sync_status, audit/consent_logs, email_message_dedup (hashed ids).
+- No raw email body storage. Only extracted fields: vendor, price, currency, cadence, next_payment_date, status, and minimal provenance.
+- Use unique constraint on hashed_message_id + user_id for idempotent ingestion.
 
-## Support
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+## Background jobs (BullMQ + Redis)
 
-## Stay in touch
+- Queues: email:fetch -> email:process -> extraction:store.
+- Retries with backoff; idempotent by hashed message id.
+- Scheduled syncs (cron) plus on-demand triggers from API.
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
 
-## License
+## API surface at a glance
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Auth
+- POST /auth/register — create user
+- POST /auth/login — obtain access/refresh tokens
+- POST /auth/refresh-token — rotate access token
+- GET  /auth/me — current user (JWT)
+
+Email (Gmail connector)
+- GET  /email/get-auth — returns Google OAuth URL
+- POST /email/get-token — exchanges OAuth code for tokens (tokens stored encrypted)
+- GET  /email/sync-status — current sync status for user (number scanned, last sync time)
+- POST /email/manual-sync — manually trigger a sync job
+
+Subscriptions
+- REST endpoints for managing/viewing extracted subscriptions (see src/subscriptions)
+
+Swagger/OpenAPI is configured via decorators in controllers.
+
+
+## Project structure (selected)
+
+- src/app — application bootstrap/controllers/services
+- src/auth — authentication, JWT, guards, DTOs
+- src/email — Gmail OAuth and sync endpoints
+- src/subscriptions — subscription DTOs, controller, service
+- test — unit/e2e tests
+- dist — build output (ignored in dev)
+
+
+## Local development
+
+Prerequisites: Node.js LTS, npm, Postgres, optional Redis.
+
+Install deps:
+- npm install
+
+Run:
+- npm run start:dev (watch mode)
+
+Environment variables (example):
+- DATABASE_URL=postgres://user:pass@localhost:5432/subscriptions
+- JWT_SECRET=your_jwt_secret
+- GOOGLE_CLIENT_ID=...
+- GOOGLE_CLIENT_SECRET=...
+- GOOGLE_REDIRECT_URI=...
+- REDIS_URL=redis://localhost:6379 (optional, for BullMQ)
+
+Testing:
+- npm run test
+- npm run test:e2e
+
+
+## Roadmap (near-term)
+
+- Implement EmailProcessor deterministic parsing with vendor rules and regexes.
+- Add Extraction module with persistence and audit logs.
+- Integrate BullMQ worker and queues for fetch/parse/extract.
+- Add Analytics summaries and suggestion generation.
+- Introduce privacy dashboard endpoints (scan counts, last sync, confidence, reasons).
+- Optional: gated LLM fallback path with explicit user opt-in and redaction.
+
