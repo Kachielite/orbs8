@@ -18,13 +18,18 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import logger from '../common/utils/logger/logger';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { OAuth2Client } from 'google-auth-library';
+import { MailService } from '../mail/mail.service';
+import { Token } from '../tokens/entities/token.entity';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Token) private readonly tokenRepository: Repository<Token>,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   async register(request: RegisterDto): Promise<GeneralResponseDto> {
@@ -173,6 +178,60 @@ export class AuthService {
         `Error refreshing token for user with refresh token ${refreshToken}: ${error.message}`,
       );
       throw new InternalServerErrorException('An error occurred during token refresh');
+    }
+  }
+
+  async requestPasswordReset(email: string): Promise<GeneralResponseDto> {
+    logger.info(`Requesting password reset for email: ${email}`);
+    try {
+      const user = await this.userRepository.findOne({ where: { email } });
+
+      if (!user) {
+        throw new NotFoundException(`User with email ${email} not found`);
+      }
+
+      await this.mailService.sendResetPasswordEmail(user.id);
+
+      return new GeneralResponseDto('Password reset request sent successfully');
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      logger.error(`Error requesting password reset for email ${email}: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred during password reset');
+    }
+  }
+
+  async resetPassword(request: ResetPasswordDto): Promise<GeneralResponseDto> {
+    logger.info('Resetting password');
+    try {
+      const { token, newPassword } = request;
+      const checkToken = await this.tokenRepository.findOne({ where: { token } });
+
+      if (!checkToken) {
+        throw new NotFoundException('Invalid reset token');
+      }
+
+      // Check if the token has expired
+      const now = new Date();
+      if (checkToken.expiresAt < now) {
+        throw new UnauthorizedException('Reset token has expired');
+      }
+
+      // Update password
+      const hashedPassword = await this.hashPassword(newPassword);
+      await this.userRepository.update(checkToken.user.id, { password: hashedPassword });
+
+      // Delete the used token
+      await this.tokenRepository.delete(checkToken.id);
+
+      return new GeneralResponseDto('Password reset successful');
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) {
+        throw error;
+      }
+      logger.error(`Error resetting password: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred during password reset');
     }
   }
 

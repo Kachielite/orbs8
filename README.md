@@ -83,6 +83,8 @@ Auth
 - POST /auth/google — login with Google (send { idToken } from Google Identity Services)
 - POST /auth/refresh-token — rotate access token
 - GET  /auth/me — current user (JWT)
+- GET /auth/request-reset-password - Initiates a password reset process by sending a reset link to the user's email.
+- POST /auth/reset-password - Resets the user's password.
 
 Email (Gmail connector)
 - GET  /email/get-auth — returns Google OAuth URL
@@ -101,7 +103,9 @@ Swagger/OpenAPI is configured via decorators in controllers.
 - src/app — application bootstrap/controllers/services
 - src/auth — authentication, JWT, guards, DTOs
 - src/email — Gmail OAuth and sync endpoints
+- src/mail - mailer, email templates
 - src/subscriptions — subscription DTOs, controller, service
+- src/tokens - reset tokens
 - test — unit/e2e tests
 - dist — build output (ignored in dev)
 
