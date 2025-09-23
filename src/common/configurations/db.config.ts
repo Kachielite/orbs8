@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Email } from '../../email/entities/email.entity';
+import { Subscription } from '../../subscriptions/entities/subscription.entity';
 
 @Module({
   imports: [
@@ -16,7 +17,8 @@ import { Email } from '../../email/entities/email.entity';
         username: configService.get('DB_USERNAME'),
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
-        entities: [User, Email],
+        entities: [User, Email, Subscription],
+        autoLoadEntities: true,
         synchronize: true,
       }),
     }),
