@@ -201,6 +201,38 @@ export class AuthService {
     }
   }
 
+  async resetPassword(token: string, newPassword: string): Promise<GeneralResponseDto> {
+    logger.info('Resetting password');
+    try {
+      const checkToken = await this.tokenRepository.findOne({ where: { token } });
+
+      if (!checkToken) {
+        throw new NotFoundException('Invalid reset token');
+      }
+
+      // Check if the token has expired
+      const now = new Date();
+      if (checkToken.expiresAt < now) {
+        throw new UnauthorizedException('Reset token has expired');
+      }
+
+      // Update password
+      const hashedPassword = await this.hashPassword(newPassword);
+      await this.userRepository.update(checkToken.user.id, { password: hashedPassword });
+
+      // Delete the used token
+      await this.tokenRepository.delete(checkToken.id);
+
+      return new GeneralResponseDto('Password reset successful');
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof UnauthorizedException) {
+        throw error;
+      }
+      logger.error(`Error resetting password: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred during password reset');
+    }
+  }
+
   async getUserById(id: number): Promise<User> {
     try {
       logger.info(`Fetching user with ID: ${id}`);
