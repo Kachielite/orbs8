@@ -14,4 +14,7 @@ export const envConstants = {
   SMTP_PORT: process.env.SMTP_PORT,
   SMTP_USERNAME: process.env.SMTP_USERNAME,
   SMTP_PASSWORD: process.env.SMTP_PASSWORD,
+  APP_NAME: process.env.APP_NAME,
+  FRONTEND_URL: process.env.FRONTEND_URL,
+  SUPPORT_EMAIL: process.env.SUPPORT_EMAIL,
 };
