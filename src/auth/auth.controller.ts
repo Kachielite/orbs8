@@ -1,15 +1,17 @@
 import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
+import { JwtGuard } from './guards/jwt.guard';
+import { CurrentUser } from './decorators/current-user.decorator';
+
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
-import { JwtGuard } from './guards/jwt.guard';
-import { CurrentUser } from './decorators/current-user.decorator';
 import { UserResponseDto } from './dto/user-response.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
 
 @ApiTags('Authentication')
 @Controller('auth')
