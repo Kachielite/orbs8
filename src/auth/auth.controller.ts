@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { RegisterDto } from './dto/register.dto';
@@ -7,8 +7,9 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { JwtGuard } from './guards/jwt.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { UserResponseDto } from './dto/user-response.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
 import { GoogleLoginDto } from './dto/google-login.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -299,5 +300,130 @@ export class AuthController {
   @Post('google')
   async googleLogin(@Body() request: GoogleLoginDto): Promise<AuthResponseDto> {
     return this.authService.loginWithGoogle(request);
+  }
+
+  @ApiOperation({
+    summary: 'Request password reset',
+    description: "Initiates a password reset process by sending a reset link to the user's email.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset email sent successfully',
+    type: GeneralResponseDto,
+    schema: {
+      example: {
+        message: 'Password reset request sent successfully',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Not Found - User not found',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'User with email example@email.com not found' },
+        error: { type: 'string', example: 'Not Found' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during password reset' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  @ApiQuery({
+    name: 'email',
+    required: true,
+    type: String,
+    description: 'Email address of the user requesting password reset',
+    example: 'user@example.com',
+  })
+  @Get('request-reset-password')
+  async requestResetPassword(@Query('email') email: string): Promise<GeneralResponseDto> {
+    return this.authService.requestPasswordReset(email);
+  }
+
+  @ApiOperation({
+    summary: 'Reset user password',
+    description: 'Resets the user password using a valid reset token and new password.',
+  })
+  @ApiBody({
+    description: 'Reset password payload',
+    type: ResetPasswordDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          newPassword: 'NewStrongPassw0rd!',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset successful',
+    type: GeneralResponseDto,
+    schema: {
+      example: {
+        message: 'Password reset successful',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid input data',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'array',
+          items: { type: 'string' },
+          example: [
+            'Token must be a valid string',
+            'New password must be at least 8 characters long',
+          ],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Not Found - Invalid or expired token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'Reset token is invalid or expired' },
+        error: { type: 'string', example: 'Not Found' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during password reset' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  @Post('reset-password')
+  async resetPassword(@Body() request: ResetPasswordDto): Promise<GeneralResponseDto> {
+    return this.authService.resetPassword(request);
   }
 }

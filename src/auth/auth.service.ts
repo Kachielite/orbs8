@@ -20,6 +20,7 @@ import { GoogleLoginDto } from './dto/google-login.dto';
 import { OAuth2Client } from 'google-auth-library';
 import { MailService } from '../mail/mail.service';
 import { Token } from '../tokens/entities/token.entity';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 
 @Injectable()
 export class AuthService {
@@ -201,9 +202,10 @@ export class AuthService {
     }
   }
 
-  async resetPassword(token: string, newPassword: string): Promise<GeneralResponseDto> {
+  async resetPassword(request: ResetPasswordDto): Promise<GeneralResponseDto> {
     logger.info('Resetting password');
     try {
+      const { token, newPassword } = request;
       const checkToken = await this.tokenRepository.findOne({ where: { token } });
 
       if (!checkToken) {
