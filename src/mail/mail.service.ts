@@ -91,7 +91,6 @@ export class MailService {
     // Build reset URL: <base>/reset-password?token=...&email=...
     const resetUrl = new URL('/reset-password', frontendBase);
     resetUrl.searchParams.set('token', token);
-    resetUrl.searchParams.set('email', email);
 
     const firstName = (name || '').trim().split(' ')[0] || email.split('@')[0];
     const supportEmail = process.env.SUPPORT_EMAIL;
@@ -174,11 +173,7 @@ export class MailService {
           <p>Hi ${firstName},</p>
           <p>We received a request to reset your ${appName} password. Click the button below to choose a new password.</p>
           <div class="btn-wrap">
-            <a class="btn" href="${resetUrl.toString()}" target="_blank" rel="noopener">Reset password</a>
-          </div>
-          <div class="card">
-            <p class="muted">If the button doesn’t work, paste this link into your browser:</p>
-            <p style="word-break:break-all; font-size:12px; line-height:1.6;"><a class="link" href="${resetUrl.toString()}" target="_blank" rel="noopener">${resetUrl.toString()}</a></p>
+            <a class="btn" style="color: white" href="${resetUrl.toString()}" target="_blank" rel="noopener">Reset password</a>
           </div>
           <p class="muted">For your security, this link will expire and can be used only once. If you didn’t request a reset, you can safely ignore this email.</p>
         </div>
@@ -197,3 +192,8 @@ export class MailService {
     };
   }
 }
+
+// <div class="card">
+//   <p class="muted">If the button doesn’t work, paste this link into your browser:</p>
+//   <p style="word-break:break-all; font-size:12px; line-height:1.6;"><a class="link" href="${resetUrl.toString()}" target="_blank" rel="noopener">${resetUrl.toString()}</a></p>
+// </div>

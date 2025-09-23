@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, OneToOne, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  JoinColumn,
+  ManyToOne,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
 
 export enum TokenType {
@@ -22,7 +29,8 @@ export class Token {
   @Column()
   expiresAt: Date;
 
-  @OneToOne(() => User)
+  @ManyToOne(() => User, { onDelete: 'CASCADE' })
+  @JoinColumn()
   user: User;
 
   @CreateDateColumn()
