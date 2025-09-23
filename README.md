@@ -80,6 +80,7 @@ Note: New modules will be added as the project is still under development. Names
 Auth
 - POST /auth/register — create user
 - POST /auth/login — obtain access/refresh tokens
+- POST /auth/google — login with Google (send { idToken } from Google Identity Services)
 - POST /auth/refresh-token — rotate access token
 - GET  /auth/me — current user (JWT)
 
@@ -116,24 +117,20 @@ Run:
 - npm run start:dev (watch mode)
 
 Environment variables (example):
-- DATABASE_URL=postgres://user:pass@localhost:5432/subscriptions
-- JWT_SECRET=your_jwt_secret
-- GOOGLE_CLIENT_ID=...
-- GOOGLE_CLIENT_SECRET=...
-- GOOGLE_REDIRECT_URI=...
-- REDIS_URL=redis://localhost:6379 (optional, for BullMQ)
+- DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_NAME
+- JWT_ACCESS_SECRET, JWT_REFRESH_SECRET
+- GOOGLE_CLIENT_ID — required for /auth/google verification and Gmail connector
+- GOOGLE_CLIENT_SECRET, GOOGLE_REDIRECT_URI — required for Gmail OAuth connector
+- REDIS_URL (optional, for BullMQ)
+
+Client-side Google login (high level):
+- Use Google Identity Services (One Tap or button) to obtain an ID token for your OAuth 2.0 Web Client (the client ID must match GOOGLE_CLIENT_ID).
+- Send that token to POST /auth/google as { idToken }.
+- The API verifies the token, links the account by email if it exists, or creates a new user with provider=google, then returns access/refresh JWTs.
 
 Testing:
 - npm run test
 - npm run test:e2e
 
-
-## Roadmap (near-term)
-
-- Implement EmailProcessor deterministic parsing with vendor rules and regexes.
-- Add Extraction module with persistence and audit logs.
-- Integrate BullMQ worker and queues for fetch/parse/extract.
-- Add Analytics summaries and suggestion generation.
-- Introduce privacy dashboard endpoints (scan counts, last sync, confidence, reasons).
-- Optional: gated LLM fallback path with explicit user opt-in and redaction.
-
+Notes:
+- TypeORM synchronize=true is enabled for local dev and will add the new User fields (provider, googleId, picture) automatically. Use migrations for production.

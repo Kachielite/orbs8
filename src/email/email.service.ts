@@ -70,7 +70,7 @@ export class EmailService {
       // Save token details
       logger.info('Gmail access obtained, saving token details');
       const newEmailAccess = this.emailRepository.create({
-        user: user,
+        user: { id: user.id } as User,
         provider: EmailProvider.GMAIL,
         accessToken: accessData.tokens.access_token!,
         refreshToken: accessData.tokens.refresh_token ?? null,
@@ -94,7 +94,7 @@ export class EmailService {
 
       const source = await this.emailRepository.findOne({
         where: {
-          user: user,
+          user: { id: user.id } as User,
         },
         relations: ['user'],
       });
@@ -153,7 +153,7 @@ export class EmailService {
     failedReason?: string,
   ): Promise<void> {
     const emailEntity = await this.emailRepository.findOne({
-      where: { user: user },
+      where: { user: { id: user.id } as User },
       relations: ['user'],
     });
     if (emailEntity) {

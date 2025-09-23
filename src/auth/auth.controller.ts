@@ -8,6 +8,7 @@ import { JwtGuard } from './guards/jwt.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { UserResponseDto } from './dto/user-response.dto';
 import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { GoogleLoginDto } from './dto/google-login.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -252,5 +253,51 @@ export class AuthController {
   @UseGuards(JwtGuard)
   getCurrentUser(@CurrentUser() user: UserResponseDto): UserResponseDto {
     return new UserResponseDto(user.id, user.email, user.name);
+  }
+
+  @ApiOperation({
+    summary: 'Login with Google',
+    description: 'Accepts a Google ID token and returns access and refresh tokens',
+  })
+  @ApiBody({
+    description: 'Google login payload',
+    type: GoogleLoginDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          idToken: 'eyJhbGciOiJSUzI1NiIsImtpZCI6Ijc4OTY5...',
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 200, description: 'Login successful', type: AuthResponseDto })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid Google token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Invalid Google token' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during Google login' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  @Post('google')
+  async googleLogin(@Body() request: GoogleLoginDto): Promise<AuthResponseDto> {
+    return this.authService.loginWithGoogle(request);
   }
 }

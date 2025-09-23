@@ -16,6 +16,8 @@ import { envConstants } from '../common/constants/env.secrets';
 import { LoginDto } from './dto/login.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import logger from '../common/utils/logger/logger';
+import { GoogleLoginDto } from './dto/google-login.dto';
+import { OAuth2Client } from 'google-auth-library';
 
 @Injectable()
 export class AuthService {
@@ -64,7 +66,10 @@ export class AuthService {
         throw new NotFoundException(`User with email ${request.email} not found`);
       }
 
-      const isPasswordValid = await this.comparePasswords(request.password, user.password);
+      const isPasswordValid = await this.comparePasswords(
+        request.password,
+        user.password as string,
+      );
 
       if (!isPasswordValid) {
         logger.error(`Invalid password for user with email ${request.email}`);
@@ -86,6 +91,60 @@ export class AuthService {
       }
       logger.error(`Error logging in user with email ${request.email}: ${error.message}`);
       throw new InternalServerErrorException('An error occurred during login');
+    }
+  }
+
+  async loginWithGoogle(request: GoogleLoginDto): Promise<AuthResponseDto> {
+    logger.info('Attempting Google login');
+    try {
+      const payload = await this.verifyGoogleIdToken(request.idToken);
+
+      const email = payload.email;
+      const googleId = payload.sub;
+      const name = (payload.name as string) || email.split('@')[0];
+      const picture = (payload.picture as string) || null;
+
+      if (!payload.email_verified) {
+        logger.error(`Google email not verified for sub: ${googleId}`);
+        throw new UnauthorizedException('Google account email not verified');
+      }
+
+      // Prefer matching by googleId first
+      let user = await this.userRepository.findOne({ where: { googleId } });
+
+      if (!user) {
+        // Fallback to email match, and link if exists
+        user = await this.userRepository.findOne({ where: { email } });
+        if (user) {
+          logger.info(`Linking existing account ${email} with Google ID ${googleId}`);
+          user.googleId = googleId;
+          user.provider = 'google';
+          user.picture = user.picture || picture;
+          await this.userRepository.save(user);
+        } else {
+          logger.info(`Creating new Google user for ${email}`);
+          user = this.userRepository.create({
+            email,
+            name,
+            provider: 'google',
+            googleId,
+            picture,
+            password: null,
+          });
+          await this.userRepository.save(user);
+        }
+      }
+
+      const accessToken = this.generateToken(user, 'access');
+      const refreshToken = this.generateToken(user, 'refresh');
+      logger.info(`Google login successful for ${email}`);
+      return new AuthResponseDto('Login successful', accessToken, refreshToken);
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      logger.error(`Error during Google login: ${error?.message || error}`);
+      throw new InternalServerErrorException('An error occurred during Google login');
     }
   }
 
@@ -163,5 +222,29 @@ export class AuthService {
       secret: envConstants.JWT_REFRESH_SECRET,
       expiresIn: '7d',
     });
+  }
+
+  private async verifyGoogleIdToken(idToken: string) {
+    try {
+      const client = new OAuth2Client(envConstants.GOOGLE_CLIENT_ID);
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: envConstants.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (!payload) {
+        throw new UnauthorizedException('Invalid Google token');
+      }
+      return payload as {
+        sub: string;
+        email: string;
+        email_verified: boolean;
+        name?: string;
+        picture?: string;
+      };
+    } catch (e) {
+      logger.error(`Failed to verify Google ID token: ${e?.message || e}`);
+      throw new UnauthorizedException('Invalid Google token');
+    }
   }
 }

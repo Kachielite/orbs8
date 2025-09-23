@@ -14,11 +14,24 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @Column()
-  password: string;
+  // Make password optional to support OAuth users
+  @Column({ nullable: true, type: 'text' })
+  password: string | null;
 
   @Column()
   name: string;
+
+  // Provider info to distinguish local vs social accounts
+  @Column({ default: 'local' })
+  provider: 'local' | 'google';
+
+  // Google subject (user id) if linked
+  @Column({ unique: true, nullable: true, type: 'text' })
+  googleId: string | null;
+
+  // Optional profile picture
+  @Column({ nullable: true, type: 'text' })
+  picture: string | null;
 
   @CreateDateColumn()
   createdAt: Date;
