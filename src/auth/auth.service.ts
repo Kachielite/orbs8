@@ -18,13 +18,17 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import logger from '../common/utils/logger/logger';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { OAuth2Client } from 'google-auth-library';
+import { MailService } from '../mail/mail.service';
+import { Token } from '../tokens/entities/token.entity';
 
 @Injectable()
 export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(Token) private readonly tokenRepository: Repository<Token>,
     private readonly jwtService: JwtService,
+    private readonly mailService: MailService,
   ) {}
 
   async register(request: RegisterDto): Promise<GeneralResponseDto> {
@@ -173,6 +177,27 @@ export class AuthService {
         `Error refreshing token for user with refresh token ${refreshToken}: ${error.message}`,
       );
       throw new InternalServerErrorException('An error occurred during token refresh');
+    }
+  }
+
+  async requestPasswordReset(email: string): Promise<GeneralResponseDto> {
+    logger.info(`Requesting password reset for email: ${email}`);
+    try {
+      const user = await this.userRepository.findOne({ where: { email } });
+
+      if (!user) {
+        throw new NotFoundException(`User with email ${email} not found`);
+      }
+
+      await this.mailService.sendResetPasswordEmail(user.id);
+
+      return new GeneralResponseDto('Password reset request sent successfully');
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      logger.error(`Error requesting password reset for email ${email}: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred during password reset');
     }
   }
 

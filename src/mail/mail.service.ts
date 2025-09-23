@@ -24,6 +24,14 @@ export class MailService {
         throw new BadRequestException('User for reset password not found');
       }
 
+      // Check if a token already exists for this user
+      const existingToken = await this.tokenRepository.findOne({
+        where: { user: { id: userId }, type: TokenType.RESET_PASSWORD },
+      });
+      // delete existing token
+      if (existingToken) {
+        await this.tokenRepository.delete(existingToken.id);
+      }
       const token = this.generateToken();
       const expiresAt = new Date();
       expiresAt.setMinutes(expiresAt.getMinutes() + 15);
