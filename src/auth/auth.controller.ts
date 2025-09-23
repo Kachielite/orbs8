@@ -18,6 +18,20 @@ export class AuthController {
     summary: 'Register a new user',
     description: 'Creates a new user account with the provided name, email, and password.',
   })
+  @ApiBody({
+    description: 'User registration payload',
+    type: RegisterDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          name: 'Jane Doe',
+          email: 'jane.doe@example.com',
+          password: 'StrongPassw0rd!',
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: 'Registration successful, please login',
@@ -77,6 +91,19 @@ export class AuthController {
     summary: 'Login user',
     description:
       'Authenticates a user with email and password and returns access and refresh tokens.',
+  })
+  @ApiBody({
+    description: 'User login payload',
+    type: LoginDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          email: 'jane.doe@example.com',
+          password: 'StrongPassw0rd!',
+        },
+      },
+    },
   })
   @ApiResponse({
     status: 200,
@@ -188,6 +215,12 @@ export class AuthController {
         },
       },
       required: ['refreshToken'],
+    },
+    examples: {
+      example: {
+        summary: 'Example',
+        value: { refreshToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
+      },
     },
   })
   async refreshToken(@Body('refreshToken') refreshToken: string): Promise<AuthResponseDto> {
