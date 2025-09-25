@@ -253,7 +253,10 @@ export class AuthService {
     logger.info('Resetting password');
     try {
       const { token, newPassword } = request;
-      const checkToken = await this.tokenRepository.findOne({ where: { token } });
+      const checkToken = await this.tokenRepository.findOne({
+        where: { token },
+        relations: ['user'],
+      });
 
       if (!checkToken) {
         throw new NotFoundException('Invalid reset token');
