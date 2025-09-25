@@ -73,10 +73,17 @@ export class AuthService {
         throw new NotFoundException(`User with email ${request.email} not found`);
       }
 
-      const isPasswordValid = await this.comparePasswords(
-        request.password,
-        user.password as string,
-      );
+      // Ensure the user has a password set (non-Google accounts)
+      if (!user.password) {
+        logger.error(
+          `User with email ${request.email} does not have a password set (likely Google account)`,
+        );
+        throw new UnauthorizedException(
+          'This account does not have a password. Please log in with Google or use password reset to set one.',
+        );
+      }
+
+      const isPasswordValid = await this.comparePasswords(request.password, user.password);
 
       if (!isPasswordValid) {
         logger.error(`Invalid password for user with email ${request.email}`);
@@ -186,8 +193,11 @@ export class AuthService {
   async verifyPasswordResetToken(request: VerifyPasswordTokenDto): Promise<GeneralResponseDto> {
     try {
       const { token, email } = request;
-      logger.info(`Verifying password reset token: ${token}`);
-      const checkToken = await this.tokenRepository.findOne({ where: { token } });
+      logger.info(`Verifying password reset token: ${token.substring(0, 20)} for email: ${email}`);
+      const checkToken = await this.tokenRepository.findOne({
+        where: { token },
+        relations: ['user'],
+      });
 
       if (!checkToken) {
         throw new ForbiddenException('Invalid reset token');
@@ -209,6 +219,7 @@ export class AuthService {
 
       return new GeneralResponseDto('Password reset token is valid');
     } catch (error) {
+      console.log('error', error);
       if (error instanceof ForbiddenException) {
         throw error;
       }
