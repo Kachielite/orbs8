@@ -36,7 +36,9 @@ export class MailService {
       const expiresAt = new Date();
       expiresAt.setMinutes(expiresAt.getMinutes() + 15);
 
-      logger.info(`Generated token for reset password: ${token}`);
+      logger.info(
+        `Generated token for reset password: ${token.substring(0, 10)}...${token.slice(-10)}`,
+      );
       const newTokenEntry = this.tokenRepository.create({
         user,
         token,
