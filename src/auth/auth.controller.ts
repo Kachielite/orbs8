@@ -19,6 +19,7 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { VerifyPasswordTokenDto } from './dto/verify-password-token.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -434,5 +435,78 @@ export class AuthController {
   @Post('reset-password')
   async resetPassword(@Body() request: ResetPasswordDto): Promise<GeneralResponseDto> {
     return this.authService.resetPassword(request);
+  }
+
+  @ApiOperation({
+    summary: 'Verify password reset token',
+    description:
+      'Validates a password reset token and associated email before allowing password reset.',
+  })
+  @ApiBody({
+    description: 'Token verification payload',
+    type: VerifyPasswordTokenDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
+          email: 'user@example.com',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Token verification successful',
+    type: GeneralResponseDto,
+    schema: {
+      example: {
+        message: 'Password reset token is valid',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Invalid or expired token',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 403 },
+        message: { type: 'string', example: 'Invalid reset token' },
+        error: { type: 'string', example: 'Forbidden' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid input data',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['Token is required', 'Email must be a string'],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred during password reset' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  @Post('/verify-token')
+  async verifyToken(@Body() request: VerifyPasswordTokenDto) {
+    return this.authService.verifyPasswordResetToken(request);
   }
 }

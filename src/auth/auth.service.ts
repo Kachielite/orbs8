@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -21,6 +22,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { MailService } from '../mail/mail.service';
 import { Token } from '../tokens/entities/token.entity';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { VerifyPasswordTokenDto } from './dto/verify-password-token.dto';
 
 @Injectable()
 export class AuthService {
@@ -178,6 +180,40 @@ export class AuthService {
         `Error refreshing token for user with refresh token ${refreshToken}: ${error.message}`,
       );
       throw new InternalServerErrorException('An error occurred during token refresh');
+    }
+  }
+
+  async verifyPasswordResetToken(request: VerifyPasswordTokenDto): Promise<GeneralResponseDto> {
+    try {
+      const { token, email } = request;
+      logger.info(`Verifying password reset token: ${token}`);
+      const checkToken = await this.tokenRepository.findOne({ where: { token } });
+
+      if (!checkToken) {
+        throw new ForbiddenException('Invalid reset token');
+      }
+
+      const now = new Date();
+      if (checkToken.expiresAt < now) {
+        throw new ForbiddenException('Reset token has expired');
+      }
+
+      const user = await this.userRepository.findOne({ where: { email } });
+      if (!user) {
+        throw new ForbiddenException('User not found');
+      }
+
+      if (checkToken.user.id !== user.id) {
+        throw new ForbiddenException('Invalid reset token');
+      }
+
+      return new GeneralResponseDto('Password reset token is valid');
+    } catch (error) {
+      if (error instanceof ForbiddenException) {
+        throw error;
+      }
+      logger.error(`Error verifying password reset token: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred during password reset');
     }
   }
 
