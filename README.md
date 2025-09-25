@@ -84,6 +84,7 @@ Auth
 - POST /auth/refresh-token — rotate access token
 - GET  /auth/me — current user (JWT)
 - GET /auth/request-reset-password - Initiates a password reset process by sending a reset link to the user's email.
+- POST /auth/verify-reset-token - Verifies the reset token and sets a new password.
 - POST /auth/reset-password - Resets the user's password.
 
 Email (Gmail connector)
