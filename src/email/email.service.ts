@@ -77,6 +77,8 @@ export class EmailService {
       } as DeepPartial<Email>);
 
       await this.emailRepository.save(newEmailAccess);
+      await this.userRepository.update({ id: user.id }, { emailLinked: true });
+
       return new GeneralResponseDto('Gmail access obtained successfully');
     } catch (error) {
       if (error instanceof BadRequestException) {
