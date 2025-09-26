@@ -35,6 +35,10 @@ export class User {
   @Column({ nullable: true, type: 'text' })
   picture: string | null;
 
+  // Email linked to the user
+  @Column()
+  emailLinked: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 
