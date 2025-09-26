@@ -263,7 +263,7 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtGuard)
   getCurrentUser(@CurrentUser() user: UserResponseDto): UserResponseDto {
-    return new UserResponseDto(user.id, user.email, user.name);
+    return new UserResponseDto(user.id, user.email, user.name, user.emailLinked);
   }
 
   @ApiOperation({

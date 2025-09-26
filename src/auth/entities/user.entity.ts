@@ -1,11 +1,4 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn, } from 'typeorm';
 import { Token } from '../../tokens/entities/token.entity';
 
 @Entity()
@@ -34,6 +27,10 @@ export class User {
   // Optional profile picture
   @Column({ nullable: true, type: 'text' })
   picture: string | null;
+
+  // Email linked to the user
+  @Column({ default: false })
+  emailLinked: boolean;
 
   @CreateDateColumn()
   createdAt: Date;

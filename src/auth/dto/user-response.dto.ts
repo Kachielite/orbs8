@@ -7,10 +7,13 @@ export class UserResponseDto {
   public email: string;
   @ApiProperty({ description: 'The name of the user' })
   public name: string;
+  @ApiProperty({ description: 'Whether the app is linked to a Google account' })
+  public emailLinked: boolean;
 
-  constructor(id: number, email: string, name: string) {
+  constructor(id: number, email: string, name: string, emailLinked: boolean) {
     this.id = id;
     this.email = email;
     this.name = name;
+    this.emailLinked = emailLinked;
   }
 }
