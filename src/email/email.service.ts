@@ -123,6 +123,17 @@ export class EmailService {
         userId: user.id,
         labelName: request.labelName,
       });
+      // Save labelName in the database
+      const email = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User },
+        relations: ['user'],
+      });
+
+      if (email) {
+        email.labelName = request.labelName;
+        await this.emailRepository.save(email);
+      }
+
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
       await this.updateSyncStatus(user, EmailSyncStatus.FAILED, error.message);
