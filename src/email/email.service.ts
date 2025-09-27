@@ -10,6 +10,7 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { ManualSyncDto } from './dto/manual-sync.dto';
 
 @Injectable()
 export class EmailService {
@@ -112,13 +113,16 @@ export class EmailService {
     }
   }
 
-  async manualSync(user: User): Promise<GeneralResponseDto> {
+  async manualSync(user: User, request: ManualSyncDto): Promise<GeneralResponseDto> {
     try {
       logger.info(`Manual sync initiated for user: ${user.id}`);
       // Set syncStatus to PENDING before queuing the job
       await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
       // Add job to the queue
-      await this.emailSyncQueue.add('sync-emails', { userId: user.id });
+      await this.emailSyncQueue.add('sync-emails', {
+        userId: user.id,
+        labelName: request.labelName,
+      });
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
       await this.updateSyncStatus(user, EmailSyncStatus.FAILED, error.message);
