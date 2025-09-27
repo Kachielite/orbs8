@@ -61,6 +61,9 @@ export class Email {
   @Column({ type: 'text', nullable: true })
   failedReason: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  labelName: string | null;
+
   @CreateDateColumn()
   createdAt: Date;
 

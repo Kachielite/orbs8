@@ -137,9 +137,14 @@ export class EmailService {
     const users = await this.userRepository.find();
     for (const user of users) {
       try {
+        // Get labelName
+        const labelName = await this.emailRepository.findOne({
+          where: { user: { id: user.id } as User },
+          relations: ['user'],
+        });
         // Set syncStatus to PENDING before queuing the job
         await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
-        await this.emailSyncQueue.add('sync-emails', { userId: user.id });
+        await this.emailSyncQueue.add('sync-emails', { userId: user.id, labelName });
         logger.info(`Scheduled sync queued for user: ${user.id}`);
       } catch (err) {
         await this.updateSyncStatus(user, EmailSyncStatus.FAILED, err.message);
