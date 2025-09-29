@@ -64,7 +64,39 @@ export class EmailService {
 
       // Check expiry_date is defined
       if (!accessData.tokens.expiry_date) {
-        throw new BadRequestException('Token expiry date is missing');
+        // Try to refresh the token if refresh_token is available
+        if (accessData.tokens.refresh_token) {
+          try {
+            const refreshedTokens = await this.oauth2Client.refreshToken(
+              accessData.tokens.refresh_token,
+            );
+            if (!refreshedTokens.tokens.expiry_date || !refreshedTokens.tokens.access_token) {
+              throw new BadRequestException(
+                'Failed to refresh token: expiry date or access token missing',
+              );
+            }
+            accessData.tokens = { ...accessData.tokens, ...refreshedTokens.tokens };
+          } catch (refreshError) {
+            const message =
+              refreshError instanceof Error ? refreshError.message : String(refreshError);
+            logger.error(`Failed to refresh Google OAuth token: ${message}`);
+            throw new BadRequestException('Failed to refresh Google OAuth token');
+          }
+        } else {
+          throw new BadRequestException(
+            'Token expiry date is missing and no refresh token available',
+          );
+        }
+      }
+
+      // Check if email tokens already exist for the user
+      const existingEmail = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User, provider: EmailProvider.GMAIL },
+        relations: ['user'],
+      });
+
+      if (existingEmail) {
+        return new GeneralResponseDto('Gmail access already obtained');
       }
 
       // Save token details
@@ -85,8 +117,9 @@ export class EmailService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      logger.error(`Failed to obtain Gmail access: ${error.message}`);
-      throw new InternalServerErrorException(`Failed to obtain Gmail access: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to obtain Gmail access: ${message}`);
+      throw new InternalServerErrorException(`Failed to obtain Gmail access: ${message}`);
     }
   }
 
