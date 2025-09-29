@@ -10,7 +10,6 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
-import { ManualSyncDto } from './dto/manual-sync.dto';
 
 @Injectable()
 export class EmailService {
@@ -64,29 +63,64 @@ export class EmailService {
 
       // Check expiry_date is defined
       if (!accessData.tokens.expiry_date) {
-        throw new BadRequestException('Token expiry date is missing');
+        // Try to refresh the token if refresh_token is available
+        if (accessData.tokens.refresh_token) {
+          try {
+            this.oauth2Client.setCredentials({ refresh_token: accessData.tokens.refresh_token });
+            // Use getToken to refresh all token fields
+            const refreshed = await this.oauth2Client.getToken(accessData.tokens.refresh_token);
+            if (!refreshed.tokens.access_token || !refreshed.tokens.expiry_date) {
+              throw new BadRequestException(
+                'Failed to refresh token: access token or expiry date missing',
+              );
+            }
+            accessData.tokens = { ...accessData.tokens, ...refreshed.tokens };
+          } catch (refreshError) {
+            const message =
+              refreshError instanceof Error ? refreshError.message : String(refreshError);
+            logger.error(`Failed to refresh Google OAuth token: ${message}`);
+            throw new BadRequestException('Failed to refresh Google OAuth token');
+          }
+        } else {
+          throw new BadRequestException(
+            'Token expiry date is missing and no refresh token available',
+          );
+        }
+      }
+
+      // Check if email tokens already exist for the user
+      const existingEmail = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User, provider: EmailProvider.GMAIL },
+        relations: ['user'],
+      });
+
+      if (existingEmail) {
+        return new GeneralResponseDto('Gmail access already obtained');
       }
 
       // Save token details
       logger.info('Gmail access obtained, saving token details');
+      const expiresAtValue = accessData.tokens.expiry_date
+        ? new Date(accessData.tokens.expiry_date)
+        : null;
       const newEmailAccess = this.emailRepository.create({
         user: { id: user.id } as User,
         provider: EmailProvider.GMAIL,
         accessToken: accessData.tokens.access_token!,
         refreshToken: accessData.tokens.refresh_token ?? null,
-        expiresAt: new Date(accessData.tokens.expiry_date),
+        expiresAt: expiresAtValue,
       } as DeepPartial<Email>);
 
       await this.emailRepository.save(newEmailAccess);
-      await this.userRepository.update({ id: user.id }, { emailLinked: true });
 
       return new GeneralResponseDto('Gmail access obtained successfully');
     } catch (error) {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      logger.error(`Failed to obtain Gmail access: ${error.message}`);
-      throw new InternalServerErrorException(`Failed to obtain Gmail access: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to obtain Gmail access: ${message}`);
+      throw new InternalServerErrorException(`Failed to obtain Gmail access: ${message}`);
     }
   }
 
@@ -113,32 +147,79 @@ export class EmailService {
     }
   }
 
-  async manualSync(user: User, request: ManualSyncDto): Promise<GeneralResponseDto> {
+  async manualSync(user: User): Promise<GeneralResponseDto> {
     try {
       logger.info(`Manual sync initiated for user: ${user.id}`);
       // Set syncStatus to PENDING before queuing the job
       await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
-      // Add job to the queue
-      await this.emailSyncQueue.add('sync-emails', {
-        userId: user.id,
-        labelName: request.labelName,
-      });
-      // Save labelName in the database
-      const email = await this.emailRepository.findOne({
+      // get label name
+      const labelName = await this.emailRepository.find({
         where: { user: { id: user.id } as User },
         relations: ['user'],
       });
 
-      if (email) {
-        email.labelName = request.labelName;
-        await this.emailRepository.save(email);
-      }
+      // Add job to the queue
+      await this.emailSyncQueue.add('sync-emails', {
+        userId: user.id,
+        labelName,
+      });
 
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
-      await this.updateSyncStatus(user, EmailSyncStatus.FAILED, error.message);
-      logger.error(`Failed to initiate manual sync: ${error.message}`);
-      throw new InternalServerErrorException(`Failed to initiate manual sync: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      await this.updateSyncStatus(user, EmailSyncStatus.FAILED, message);
+      logger.error(`Failed to initiate manual sync: ${message}`);
+      throw new InternalServerErrorException(`Failed to initiate manual sync: ${message}`);
+    }
+  }
+
+  async verifyAccessToEmailLabel(
+    user: Partial<User>,
+    labelName: string,
+  ): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Verifying access to email and label for user: ${user.id}`);
+      const emailEntity = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User },
+        relations: ['user'],
+      });
+      if (!emailEntity) {
+        throw new BadRequestException('Email not linked');
+      }
+      this.oauth2Client.setCredentials({
+        access_token: emailEntity.accessToken,
+        refresh_token: emailEntity.refreshToken ?? undefined,
+        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
+      });
+      const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+      // Verify access to the email account
+      await gmail.users.getProfile({ userId: 'me' });
+      // If a labelName is provided, verify access to that label
+      const res = await gmail.users.labels.list({ userId: 'me' });
+      const labels = res.data.labels || [];
+      const labelExists = labels.some((label) => label.name === labelName);
+      logger.info(`Label "${labelName}" exists: ${labelExists}`);
+
+      if (!labelExists) {
+        throw new BadRequestException(`Label "${labelName}" does not exist`);
+      }
+
+      // save label name
+      emailEntity.labelName = labelName;
+      logger.info(`Saving label name "${labelName}" for user: ${user.id}`);
+      await this.emailRepository.save(emailEntity);
+
+      logger.info(`Updating user's emailLinked status to true for user: ${user.id}`);
+      await this.userRepository.update({ id: user.id }, { emailLinked: true });
+
+      logger.info(`Label "${labelName}" verified successfully`);
+      return new GeneralResponseDto(`Access to email label: ${labelName} verified`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to verify access to email label: ${message}`);
+      throw new BadRequestException(
+        `Failed to verify access to the email label. Please ensure the label exists in Gmail and the spelling matches exactly.`,
+      );
     }
   }
 
@@ -158,10 +239,11 @@ export class EmailService {
         await this.emailSyncQueue.add('sync-emails', { userId: user.id, labelName });
         logger.info(`Scheduled sync queued for user: ${user.id}`);
       } catch (err) {
-        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, err.message);
-        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${err.message}`);
+        const message = err instanceof Error ? err.message : String(err);
+        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, message);
+        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${message}`);
         throw new InternalServerErrorException(
-          `Failed to queue scheduled sync for user ${user.id}: ${err.message}`,
+          `Failed to queue scheduled sync for user ${user.id}: ${message}`,
         );
       }
     }
