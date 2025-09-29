@@ -1,11 +1,18 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { EmailService } from './email.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { User } from '../auth/entities/user.entity';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { StatusDto } from './dto/status.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { ManualSyncDto } from './dto/manual-sync.dto';
 
 @ApiTags('Email Management')
@@ -207,5 +214,79 @@ export class EmailController {
     @Body() request: ManualSyncDto,
   ): Promise<GeneralResponseDto> {
     return await this.emailService.manualSync(user, request);
+  }
+
+  @Get('verify-label-access')
+  @ApiOperation({
+    summary: 'Verify Gmail label access',
+    description:
+      'Verifies that the authenticated user has access to their Gmail account and optionally checks if a specific label exists.',
+  })
+  @ApiQuery({
+    name: 'label-name',
+    required: false,
+    description: 'The name of the Gmail label to verify access for (optional)',
+    example: 'Transactions',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Access to email and label verified successfully',
+    type: GeneralResponseDto,
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Access to email and label verified' },
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Email not linked or label does not exist',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'string',
+          examples: [
+            'Email not linked',
+            'Label "InvalidLabel" does not exist',
+            'Failed to verify access to email and label',
+          ],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error while verifying label access',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'Error verifying label access' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async verifyLabelAccess(
+    @Query('label-name') labelName: string,
+    @CurrentUser() user: Partial<User>,
+  ): Promise<GeneralResponseDto> {
+    return await this.emailService.verifyAccessToEmailLabel(user, labelName);
   }
 }

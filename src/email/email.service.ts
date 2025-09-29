@@ -67,15 +67,15 @@ export class EmailService {
         // Try to refresh the token if refresh_token is available
         if (accessData.tokens.refresh_token) {
           try {
-            const refreshedTokens = await this.oauth2Client.refreshToken(
-              accessData.tokens.refresh_token,
-            );
-            if (!refreshedTokens.tokens.expiry_date || !refreshedTokens.tokens.access_token) {
+            this.oauth2Client.setCredentials({ refresh_token: accessData.tokens.refresh_token });
+            // Use getToken to refresh all token fields
+            const refreshed = await this.oauth2Client.getToken(accessData.tokens.refresh_token);
+            if (!refreshed.tokens.access_token || !refreshed.tokens.expiry_date) {
               throw new BadRequestException(
-                'Failed to refresh token: expiry date or access token missing',
+                'Failed to refresh token: access token or expiry date missing',
               );
             }
-            accessData.tokens = { ...accessData.tokens, ...refreshedTokens.tokens };
+            accessData.tokens = { ...accessData.tokens, ...refreshed.tokens };
           } catch (refreshError) {
             const message =
               refreshError instanceof Error ? refreshError.message : String(refreshError);
@@ -101,16 +101,18 @@ export class EmailService {
 
       // Save token details
       logger.info('Gmail access obtained, saving token details');
+      const expiresAtValue = accessData.tokens.expiry_date
+        ? new Date(accessData.tokens.expiry_date)
+        : null;
       const newEmailAccess = this.emailRepository.create({
         user: { id: user.id } as User,
         provider: EmailProvider.GMAIL,
         accessToken: accessData.tokens.access_token!,
         refreshToken: accessData.tokens.refresh_token ?? null,
-        expiresAt: new Date(accessData.tokens.expiry_date),
+        expiresAt: expiresAtValue,
       } as DeepPartial<Email>);
 
       await this.emailRepository.save(newEmailAccess);
-      await this.userRepository.update({ id: user.id }, { emailLinked: true });
 
       return new GeneralResponseDto('Gmail access obtained successfully');
     } catch (error) {
@@ -169,9 +171,51 @@ export class EmailService {
 
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
-      await this.updateSyncStatus(user, EmailSyncStatus.FAILED, error.message);
-      logger.error(`Failed to initiate manual sync: ${error.message}`);
-      throw new InternalServerErrorException(`Failed to initiate manual sync: ${error.message}`);
+      const message = error instanceof Error ? error.message : String(error);
+      await this.updateSyncStatus(user, EmailSyncStatus.FAILED, message);
+      logger.error(`Failed to initiate manual sync: ${message}`);
+      throw new InternalServerErrorException(`Failed to initiate manual sync: ${message}`);
+    }
+  }
+
+  async verifyAccessToEmailLabel(
+    user: Partial<User>,
+    labelName: string,
+  ): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Verifying access to email and label for user: ${user.id}`);
+      const emailEntity = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User },
+        relations: ['user'],
+      });
+      if (!emailEntity) {
+        throw new BadRequestException('Email not linked');
+      }
+      this.oauth2Client.setCredentials({
+        access_token: emailEntity.accessToken,
+        refresh_token: emailEntity.refreshToken ?? undefined,
+        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
+      });
+      const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
+      // Verify access to the email account
+      await gmail.users.getProfile({ userId: 'me' });
+      // If a labelName is provided, verify access to that label
+      if (labelName) {
+        const res = await gmail.users.labels.list({ userId: 'me' });
+        const labels = res.data.labels || [];
+        const labelExists = labels.some((label) => label.name === labelName);
+        if (!labelExists) {
+          throw new BadRequestException(`Label "${labelName}" does not exist`);
+        }
+      }
+      await this.userRepository.update({ id: user.id }, { emailLinked: true });
+      return new GeneralResponseDto(`Access to email label: ${labelName} verified`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to verify access to email label: ${message}`);
+      throw new BadRequestException(
+        `Failed to verify access to email label. Check if the label exists`,
+      );
     }
   }
 
@@ -191,10 +235,11 @@ export class EmailService {
         await this.emailSyncQueue.add('sync-emails', { userId: user.id, labelName });
         logger.info(`Scheduled sync queued for user: ${user.id}`);
       } catch (err) {
-        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, err.message);
-        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${err.message}`);
+        const message = err instanceof Error ? err.message : String(err);
+        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, message);
+        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${message}`);
         throw new InternalServerErrorException(
-          `Failed to queue scheduled sync for user ${user.id}: ${err.message}`,
+          `Failed to queue scheduled sync for user ${user.id}: ${message}`,
         );
       }
     }
