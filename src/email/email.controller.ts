@@ -13,7 +13,6 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
-import { ManualSyncDto } from './dto/manual-sync.dto';
 
 @ApiTags('Email Management')
 @ApiBearerAuth()
@@ -170,16 +169,6 @@ export class EmailController {
     summary: 'Manually trigger email synchronization',
     description: 'Initiates a manual synchronization of emails for the authenticated user.',
   })
-  @ApiBody({
-    description: 'Payload for manual sync',
-    type: ManualSyncDto,
-    examples: {
-      valid: {
-        summary: 'Valid request',
-        value: { labelName: 'Subscriptions' },
-      },
-    },
-  })
   @ApiResponse({
     status: 200,
     description: 'Manual sync initiated successfully',
@@ -209,11 +198,8 @@ export class EmailController {
       },
     },
   })
-  async manualSync(
-    @CurrentUser() user: User,
-    @Body() request: ManualSyncDto,
-  ): Promise<GeneralResponseDto> {
-    return await this.emailService.manualSync(user, request);
+  async manualSync(@CurrentUser() user: User): Promise<GeneralResponseDto> {
+    return await this.emailService.manualSync(user);
   }
 
   @Get('verify-label-access')

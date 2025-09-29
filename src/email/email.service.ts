@@ -10,7 +10,6 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
-import { ManualSyncDto } from './dto/manual-sync.dto';
 
 @Injectable()
 export class EmailService {
@@ -148,26 +147,22 @@ export class EmailService {
     }
   }
 
-  async manualSync(user: User, request: ManualSyncDto): Promise<GeneralResponseDto> {
+  async manualSync(user: User): Promise<GeneralResponseDto> {
     try {
       logger.info(`Manual sync initiated for user: ${user.id}`);
       // Set syncStatus to PENDING before queuing the job
       await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
-      // Add job to the queue
-      await this.emailSyncQueue.add('sync-emails', {
-        userId: user.id,
-        labelName: request.labelName,
-      });
-      // Save labelName in the database
-      const email = await this.emailRepository.findOne({
+      // get label name
+      const labelName = await this.emailRepository.find({
         where: { user: { id: user.id } as User },
         relations: ['user'],
       });
 
-      if (email) {
-        email.labelName = request.labelName;
-        await this.emailRepository.save(email);
-      }
+      // Add job to the queue
+      await this.emailSyncQueue.add('sync-emails', {
+        userId: user.id,
+        labelName,
+      });
 
       return new GeneralResponseDto('Manual sync initiated successfully');
     } catch (error) {
@@ -200,21 +195,30 @@ export class EmailService {
       // Verify access to the email account
       await gmail.users.getProfile({ userId: 'me' });
       // If a labelName is provided, verify access to that label
-      if (labelName) {
-        const res = await gmail.users.labels.list({ userId: 'me' });
-        const labels = res.data.labels || [];
-        const labelExists = labels.some((label) => label.name === labelName);
-        if (!labelExists) {
-          throw new BadRequestException(`Label "${labelName}" does not exist`);
-        }
+      const res = await gmail.users.labels.list({ userId: 'me' });
+      const labels = res.data.labels || [];
+      const labelExists = labels.some((label) => label.name === labelName);
+      logger.info(`Label "${labelName}" exists: ${labelExists}`);
+
+      if (!labelExists) {
+        throw new BadRequestException(`Label "${labelName}" does not exist`);
       }
+
+      // save label name
+      emailEntity.labelName = labelName;
+      logger.info(`Saving label name "${labelName}" for user: ${user.id}`);
+      await this.emailRepository.save(emailEntity);
+
+      logger.info(`Updating user's emailLinked status to true for user: ${user.id}`);
       await this.userRepository.update({ id: user.id }, { emailLinked: true });
+
+      logger.info(`Label "${labelName}" verified successfully`);
       return new GeneralResponseDto(`Access to email label: ${labelName} verified`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Failed to verify access to email label: ${message}`);
       throw new BadRequestException(
-        `Failed to verify access to email label. Check if the label exists`,
+        `Failed to verify access to the email label. Please ensure the label exists in Gmail and the spelling matches exactly.`,
       );
     }
   }
