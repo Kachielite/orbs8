@@ -9,6 +9,8 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { EmailModule } from '../email/email.module';
 import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { MailConfigModule } from '../common/configurations/mail.config';
+import { CategoryModule } from '../category/category.module';
+import { AccountModule } from '../account/account.module';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { MailConfigModule } from '../common/configurations/mail.config';
     EmailModule,
     SubscriptionsModule,
     MailConfigModule,
+    CategoryModule,
+    AccountModule,
   ],
   controllers: [AppController],
   providers: [AppService],

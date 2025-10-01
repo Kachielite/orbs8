@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Token } from '../../tokens/entities/token.entity';
+import { Account } from '../../account/entities/account.entity';
 
 @Entity()
 export class User {
@@ -47,4 +48,7 @@ export class User {
 
   @OneToMany(() => Token, (token) => token.user)
   tokens: Token[];
+
+  @OneToMany(() => Account, (account) => account.user)
+  accounts: Account[];
 }
