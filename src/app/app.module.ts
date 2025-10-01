@@ -7,7 +7,6 @@ import { AuthModule } from '../auth/auth.module';
 import { BullmqConfigModule } from '../common/configurations/bullmq.config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { EmailModule } from '../email/email.module';
-import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { MailConfigModule } from '../common/configurations/mail.config';
 import { CategoryModule } from '../category/category.module';
 import { AccountModule } from '../account/account.module';
@@ -21,7 +20,6 @@ import { TransactionModule } from '../transaction/transaction.module';
     BullmqConfigModule,
     ScheduleModule.forRoot(),
     EmailModule,
-    SubscriptionsModule,
     MailConfigModule,
     CategoryModule,
     AccountModule,
