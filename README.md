@@ -113,16 +113,30 @@ Bank Notifications
 Swagger/OpenAPI is configured via decorators in controllers.
 
 
-## Project structure (selected)
+## Project structure
 
-- src/app — application bootstrap/controllers/services
-- src/auth — authentication, JWT, guards, DTOs
-- src/email — Gmail OAuth and sync endpoints
-- src/mail - mailer, email templates
-- src/transactionss — bank notification DTOs, controller, service
-- src/tokens - reset tokens
-- test — unit/e2e tests
-- dist — build output (ignored in dev)
+Core modules:
+- src/app — application bootstrap, main module configuration
+- src/auth — authentication system (JWT, guards, strategies, user management)
+- src/account — account management (entities, DTOs, CRUD operations)
+- src/transaction — transaction processing (entities, DTOs, controllers, services)
+- src/category — category management for transactions
+- src/bank — bank entity definitions and relationships
+- src/currency — currency entities and management
+- src/email — Gmail OAuth integration and email sync functionality
+- src/subscriptions — bank notification subscription management
+- src/tokens — password reset token handling
+- src/mail — email service and templates
+
+Infrastructure:
+- src/common — shared utilities, configurations, DTOs (database config, response DTOs)
+  - src/common/configurations — database and other system configurations
+  - src/common/dto — shared data transfer objects (pagination, responses)
+  - src/common/utils — utility functions and helpers
+
+Testing and build:
+- test — unit and e2e test files
+- dist — compiled application output (ignored in development)
 
 
 ## Local development
