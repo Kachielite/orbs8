@@ -5,6 +5,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Email } from '../../email/entities/email.entity';
 import { Subscription } from '../../subscriptions/entities/subscription.entity';
 import { Token } from '../../tokens/entities/token.entity';
+import { Account } from '../../account/entities/account.entity';
+import { Bank } from '../../bank/entities/bank.entity';
+import { Category } from '../../category/entities/category.entity';
+import { Currency } from '../../currency/entities/currency.entity';
+import { Transaction } from '../../transaction/entities/transaction.entity';
 
 @Module({
   imports: [
@@ -18,7 +23,17 @@ import { Token } from '../../tokens/entities/token.entity';
         username: configService.get('DB_USERNAME'),
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
-        entities: [User, Email, Subscription, Token],
+        entities: [
+          User,
+          Email,
+          Subscription,
+          Token,
+          Account,
+          Bank,
+          Category,
+          Currency,
+          Transaction,
+        ],
         autoLoadEntities: true,
         synchronize: true,
       }),

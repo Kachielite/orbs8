@@ -1,0 +1,191 @@
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Transaction } from './entities/transaction.entity';
+import { UpdateTransactionDto } from './dto/update-transaction.dto';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from '../auth/entities/user.entity';
+import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { TransactionDto } from './dto/transaction.dto';
+import { GetTransactionQuery } from './interface/transaction-query.interface';
+import logger from '../common/utils/logger/logger';
+import { Category } from '../category/entities/category.entity';
+import { GeneralResponseDto } from '../common/dto/general-response.dto';
+import { paginationUtil } from '../common/utils/pagination.util';
+
+@Injectable()
+export class TransactionService {
+  // Validate and normalize sort/order
+  private allowedSortFields: Array<keyof Transaction> = [
+    'id',
+    'amount',
+    'type',
+    'transactionDate',
+    'createdAt',
+  ];
+
+  constructor(
+    @InjectRepository(Transaction) private readonly transactionRepository: Repository<Transaction>,
+    @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
+  ) {}
+
+  async findAll(
+    user: Partial<User>,
+    query: GetTransactionQuery,
+  ): Promise<PaginatedResponseDto<TransactionDto>> {
+    const { page, limit, skip, take, order, search } = this.createPaginationParams(query);
+
+    try {
+      logger.info(`Fetching transactions for user: ${user.id}`);
+      const [transactions, total] = await this.transactionRepository.findAndCount({
+        where: {
+          ...(search ? { description: search } : {}),
+          user: { id: user.id },
+        },
+        relations: ['user'],
+        skip,
+        take,
+        order,
+      });
+
+      const hasNext = skip + take < total;
+      const hasPrevious = skip > 0;
+      const transactionsDto = transactions.map((transaction) => this.convertToDto(transaction));
+
+      return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
+    } catch (error) {
+      logger.error(`Error fetching transactions: ${error.message}`);
+      throw new InternalServerErrorException(`Error fetching transactions: ${error.message}`);
+    }
+  }
+
+  async findOne(id: number, user: Partial<User>): Promise<TransactionDto> {
+    try {
+      logger.info(`Fetching transaction with ID: ${id}`);
+      const transaction = await this.transactionRepository.findOne({
+        where: { id, user: { id: user.id } },
+        relations: ['user', 'category', 'account', 'currency', 'bank'],
+      });
+
+      if (!transaction) {
+        throw new NotFoundException(`Transaction with ID ${id} not found for user ${user.id}`);
+      }
+
+      return this.convertToDto(transaction);
+    } catch (error) {
+      logger.error(`Error fetching transaction with ID: ${id}: ${error.message}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Error fetching transaction with ID: ${id}: ${error.message}`,
+      );
+    }
+  }
+
+  async findAllByAccount(
+    accountId: number,
+    query: GetTransactionQuery,
+    user: Partial<User>,
+  ): Promise<PaginatedResponseDto<TransactionDto>> {
+    const { page, limit, skip, take, order, search } = this.createPaginationParams(query);
+
+    try {
+      logger.info(`Fetching transactions for account: ${accountId}`);
+      const [transactions, total] = await this.transactionRepository.findAndCount({
+        where: {
+          ...(search ? { description: search } : {}),
+          account: { id: accountId, user: { id: user.id } },
+        },
+        relations: ['user', 'category', 'account', 'currency', 'bank'],
+        skip,
+        take,
+        order,
+      });
+
+      const hasNext = skip + take < total;
+      const hasPrevious = skip > 0;
+      const transactionsDto = transactions.map((transaction) => this.convertToDto(transaction));
+
+      return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
+    } catch (error) {
+      logger.error(`Error fetching transactions for account ${accountId}: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Error fetching transactions for account ${accountId}: ${error.message}`,
+      );
+    }
+  }
+
+  async update(
+    id: number,
+    user: Partial<User>,
+    updateTransactionDto: UpdateTransactionDto,
+  ): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Updating transaction with ID: ${id}`);
+      const transaction = await this.transactionRepository.findOne({
+        where: { id, user: { id: user.id } },
+        relations: ['user', 'category', 'account', 'currency', 'bank'],
+      });
+
+      if (!transaction) {
+        throw new NotFoundException(`Transaction with ID ${id} not found for user ${user.id}`);
+      }
+
+      const category = await this.categoryRepository.findOne({
+        where: { id: updateTransactionDto.categoryId },
+      });
+
+      if (!category) {
+        throw new NotFoundException(
+          `Category with ID ${updateTransactionDto.categoryId} not found`,
+        );
+      }
+
+      await this.transactionRepository.update(id, {
+        category: category,
+      });
+
+      return new GeneralResponseDto('Transaction updated successfully');
+    } catch (error) {
+      logger.error(`Error updating transaction with ID: ${id}: ${error.message}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Error updating transaction with ID: ${id}: ${error.message}`,
+      );
+    }
+  }
+
+  private createPaginationParams(query: GetTransactionQuery) {
+    // Create a properly typed query object that matches the pagination utility's expectations
+    const typedQuery = {
+      page: query.page,
+      limit: query.limit,
+      search: query.search,
+      sort: query.sort as keyof Transaction,
+      order: query.order,
+    };
+
+    return paginationUtil<Transaction>({
+      query: typedQuery,
+      allowedSortFields: this.allowedSortFields,
+      defaultSortField: 'createdAt' as keyof Transaction,
+    });
+  }
+
+  private convertToDto(transaction: Transaction): TransactionDto {
+    return new TransactionDto(
+      transaction.id,
+      transaction.amount,
+      transaction.currency.name,
+      transaction.type,
+      transaction.description,
+      transaction.transactionDate,
+      transaction.category.name,
+      transaction.account.accountNumber,
+      transaction.account.bank.name,
+      transaction.createdAt,
+    );
+  }
+}

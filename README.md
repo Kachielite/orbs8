@@ -93,6 +93,20 @@ Email (Gmail connector)
 - GET  /email/sync-status — current sync status for user (number scanned, last sync time)
 - POST /email/manual-sync — manually trigger a sync job
 
+Account
+- GET  /account — get all accounts for authenticated user
+- GET  /account/:id — get specific account by ID
+
+Category
+- GET  /category — get all categories (with optional search query)
+- GET  /category/:id — get specific category by ID
+
+Transaction
+- GET  /transaction — get all transactions (paginated, with search, sort, and filter options)
+- GET  /transaction/account/:accountId — get transactions for specific account (paginated, with search, sort, and filter options)
+- GET  /transaction/:id — get specific transaction by ID
+- PUT  /transaction/:id — update transaction fields
+
 Bank Notifications
 - REST endpoints for managing/viewing extracted bank notifications (see src/subscriptions)
 
