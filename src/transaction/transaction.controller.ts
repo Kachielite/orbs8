@@ -16,6 +16,7 @@ import {
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
+import { GeneralResponseDto } from '../common/dto/general-response.dto';
 
 @ApiTags('Transaction Management')
 @Controller('transaction')
@@ -161,7 +162,6 @@ export class TransactionController {
       },
     },
   })
-  @ApiResponse({ status: 404, description: 'Not Found - Account not found or not accessible' })
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async findAllByAccount(
     @Query() query: GetTransactionQuery,
@@ -229,7 +229,11 @@ export class TransactionController {
   })
   @ApiParam({ name: 'id', type: Number, description: 'Transaction ID', example: 456 })
   @ApiBody({ description: 'Fields to update (all optional)', type: UpdateTransactionDto })
-  @ApiResponse({ status: 200, description: 'Transaction updated successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Transaction updated successfully',
+    type: GeneralResponseDto,
+  })
   @ApiResponse({
     status: 400,
     description: 'Bad Request - Invalid input data',
