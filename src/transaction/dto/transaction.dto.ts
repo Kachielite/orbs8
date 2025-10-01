@@ -2,34 +2,34 @@ import { ApiProperty } from '@nestjs/swagger';
 import { TransactionType } from '../entities/transaction.entity';
 
 export class TransactionDto {
-  @ApiProperty({ description: 'The id of the transaction' })
+  @ApiProperty({ description: 'The id of the transaction', example: 1 })
   id: number;
 
-  @ApiProperty({ description: 'The amount of the transaction' })
+  @ApiProperty({ description: 'The amount of the transaction', example: 100 })
   amount: number;
 
-  @ApiProperty({ description: 'The date of the transaction' })
+  @ApiProperty({ description: 'The date of the transaction', example: '2023-01-01' })
   currency: string;
 
-  @ApiProperty({ description: 'The type of the transaction' })
+  @ApiProperty({ description: 'The type of the transaction', example: 'credit' })
   type: TransactionType;
 
-  @ApiProperty({ description: 'The description of the transaction' })
+  @ApiProperty({ description: 'The description of the transaction', example: 'Salary' })
   description: string;
 
-  @ApiProperty({ description: 'The date of the transaction' })
+  @ApiProperty({ description: 'The date of the transaction', example: '2023-01-01' })
   transactionDate: Date;
 
-  @ApiProperty({ description: 'The category of the transaction' })
+  @ApiProperty({ description: 'The category of the transaction', example: 'Salary' })
   category: string;
 
-  @ApiProperty({ description: 'The account of the transaction' })
+  @ApiProperty({ description: 'The account of the transaction', example: 'Checking' })
   account: string;
 
-  @ApiProperty({ description: 'The bank of the transaction' })
+  @ApiProperty({ description: 'The bank of the transaction', example: 'Bank of America' })
   bank: string;
 
-  @ApiProperty({ description: 'The date of the transaction' })
+  @ApiProperty({ description: 'The date of the transaction', example: '2023-01-01' })
   createdAt: Date;
 
   constructor(

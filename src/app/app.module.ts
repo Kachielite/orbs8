@@ -11,6 +11,7 @@ import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { MailConfigModule } from '../common/configurations/mail.config';
 import { CategoryModule } from '../category/category.module';
 import { AccountModule } from '../account/account.module';
+import { TransactionModule } from '../transaction/transaction.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { AccountModule } from '../account/account.module';
     MailConfigModule,
     CategoryModule,
     AccountModule,
+    TransactionModule,
   ],
   controllers: [AppController],
   providers: [AppService],
