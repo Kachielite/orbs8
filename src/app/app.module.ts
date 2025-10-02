@@ -11,6 +11,7 @@ import { MailConfigModule } from '../common/configurations/mail.config';
 import { CategoryModule } from '../category/category.module';
 import { AccountModule } from '../account/account.module';
 import { TransactionModule } from '../transaction/transaction.module';
+import { EmbeddingModule } from '../common/configurations/embedding.config';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { TransactionModule } from '../transaction/transaction.module';
     CategoryModule,
     AccountModule,
     TransactionModule,
+    EmbeddingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
