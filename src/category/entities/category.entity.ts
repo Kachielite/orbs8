@@ -34,7 +34,7 @@ export class Category {
   })
   type: CategoryType;
 
-  // Use a Postgres float array instead of unsupported vector type
+  // Use a Postgres float array instead of not supported vector type
   @Column({ type: 'real', array: true, nullable: true })
   embedding: number[];
 
