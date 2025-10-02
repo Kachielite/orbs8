@@ -1,15 +1,16 @@
+import { Injectable, Module } from '@nestjs/common';
 import { OpenAI } from '@langchain/openai';
-import { Injectable } from '@nestjs/common';
-import { LangSmithService } from '../../langsmith/langsmith.service';
+import { envConstants } from '../constants/env.secrets';
 
 @Injectable()
 export class OpenAIConfig {
-  private readonly llm: OpenAI;
+  private llm: OpenAI;
 
-  constructor(private langSmithService: LangSmithService) {
+  constructor() {
     this.llm = new OpenAI({
+      apiKey: envConstants.OPENAI_API_KEY,
+      modelName: 'gpt-3.5-turbo',
       temperature: 0.7,
-      model: 'gpt-3.5-turbo',
     });
   }
 
@@ -17,3 +18,9 @@ export class OpenAIConfig {
     return this.llm;
   }
 }
+
+@Module({
+  providers: [OpenAIConfig],
+  exports: [OpenAIConfig],
+})
+export class OpenAIModule {}

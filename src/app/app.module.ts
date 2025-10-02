@@ -13,6 +13,7 @@ import { AccountModule } from '../account/account.module';
 import { TransactionModule } from '../transaction/transaction.module';
 import { EmbeddingModule } from '../common/configurations/embedding.config';
 import { LangSmithModule } from '../langsmith/langsmith.module';
+import { OpenAIModule } from '../common/configurations/openai.config';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { LangSmithModule } from '../langsmith/langsmith.module';
     AccountModule,
     TransactionModule,
     EmbeddingModule,
+    OpenAIModule,
   ],
   controllers: [AppController],
   providers: [AppService],
