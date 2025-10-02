@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { EmbeddingConfig } from './embedding.config';
+import { EmbeddingConfig } from '../embedding/embedding.config';
 
 @Global()
 @Module({
