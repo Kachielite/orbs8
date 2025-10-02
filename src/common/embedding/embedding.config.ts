@@ -9,10 +9,6 @@ export class EmbeddingConfig {
     openAIApiKey: envConstants.OPENAI_API_KEY,
   });
 
-  public async embedText(text: string) {
-    return this.embeddings.embedQuery(text);
-  }
-
   public getEmbeddings(): OpenAIEmbeddings {
     return this.embeddings;
   }
