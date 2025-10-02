@@ -17,4 +17,5 @@ export const envConstants = {
   APP_NAME: process.env.APP_NAME,
   FRONTEND_URL: process.env.FRONTEND_URL,
   SUPPORT_EMAIL: process.env.SUPPORT_EMAIL,
+  FORCE_REEMBED: process.env.FORCE_REEMBED,
 };
