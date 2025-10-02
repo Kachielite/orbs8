@@ -63,23 +63,22 @@ export class CategoryService {
     for (const cat of categories) {
       const text = `${cat.name}: ${cat.description}`;
 
-      if (!forceReembed && cat.embedding && cat.lastEmbeddingText === text) {
+      if (forceReembed && cat.embedding && cat.lastEmbeddingText === text) {
         logger.info(`Skipping category: ${cat.name} (no change)`);
-        continue;
+      } else {
+        const [embedding] = await this.embeddings.getEmbeddings().embedDocuments([text]);
+
+        await this.categoryRepository.update(cat.id, {
+          embedding,
+          lastEmbeddingText: text,
+        });
+
+        logger.info(
+          forceReembed
+            ? `♻️ Re-embedded category: ${cat.name}`
+            : `✅ Updated embedding for category: ${cat.name}`,
+        );
       }
-
-      const [embedding] = await this.embeddings.getEmbeddings().embedDocuments([text]);
-
-      await this.categoryRepository.update(cat.id, {
-        embedding,
-        lastEmbeddingText: text,
-      });
-
-      logger.info(
-        forceReembed
-          ? `♻️ Re-embedded category: ${cat.name}`
-          : `✅ Updated embedding for category: ${cat.name}`,
-      );
     }
   }
 
