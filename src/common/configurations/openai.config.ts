@@ -4,12 +4,12 @@ import { envConstants } from '../constants/env.secrets';
 
 @Injectable()
 export class OpenAIConfig {
-  private llm: OpenAI;
+  private readonly llm: OpenAI;
 
   constructor() {
     this.llm = new OpenAI({
       apiKey: envConstants.OPENAI_API_KEY,
-      modelName: 'gpt-3.5-turbo',
+      model: 'gpt-3.5-turbo',
       temperature: 0.7,
     });
   }
