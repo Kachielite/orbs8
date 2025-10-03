@@ -8,10 +8,8 @@ import logger from '../common/utils/logger/logger';
 import { envConstants } from '../common/constants/env.secrets';
 import { EmbeddingConfig } from '../common/embedding/embedding.config';
 import { PGVectorStore } from '@langchain/community/vectorstores/pgvector';
-import { RunnableLambda, RunnableSequence } from '@langchain/core/runnables';
 import { OpenAIConfig } from '../common/configurations/openai.config';
 import { LangSmithService } from '../langsmith/langsmith.service';
-import { traceable } from 'langsmith/traceable';
 
 @Injectable()
 export class CategoryService {
@@ -101,57 +99,40 @@ export class CategoryService {
     }
   }
 
-  classifyTransaction(k = 3, threshold = 0.6) {
-    return RunnableSequence.from([
-      // Step 1: retrieve top-k from vector DB
-      RunnableLambda.from(
-        traceable(
-          async (desc: string) => {
-            try {
-              const results = await this.store.similaritySearchWithScore(desc, k);
+  async classifyTransaction(description: string) {
+    const k = 3;
+    const threshold = 0.6;
+    logger.info(`Classifying transaction: ${description}`);
+    try {
+      logger.info(`Fetching top-k from vector DB`);
+      const results = await this.store.similaritySearchWithScore(description, k);
 
-              // Filter results based on a similarity threshold
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const filteredResults = results.filter(([_, score]) => score >= threshold);
+      // Filter results based on a similarity threshold
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const filteredResults = results.filter(([_, score]) => score >= threshold);
 
-              const candidates = filteredResults.map(([doc, score]) => ({
-                id: doc.metadata?.id,
-                name: doc.metadata?.name,
-                description: doc.pageContent,
-                type: doc.metadata?.type,
-                score,
-              }));
+      const candidates = filteredResults.map(([doc, score]) => ({
+        id: doc.metadata?.id,
+        name: doc.metadata?.name,
+        description: doc.pageContent,
+        type: doc.metadata?.type,
+        score,
+      }));
 
-              logger.info(`Found ${candidates.length} candidates for "${desc}"`);
-              return { description: desc, candidates };
-            } catch (error) {
-              logger.error(`Error retrieving candidates: ${(error as Error).message}`);
-              return { description: desc, candidates: [] };
-            }
-          },
-          { name: 'retrieve_candidates' },
-        ),
-      ),
+      logger.info(`Found ${candidates.length} candidates for "${description}"`);
 
-      // Step 2: LLM selects best category
-      RunnableLambda.from(
-        traceable(
-          async (input: { description: string; candidates: any[] }) => {
-            try {
-              if (!input.candidates.length) {
-                logger.info('No candidates found, returning Uncategorized');
-                return await this.getUncategorized();
-              }
+      if (!candidates.length) {
+        logger.info('No candidates found, returning Uncategorized');
+        return await this.getUncategorized();
+      }
 
-              const candidateList = input.candidates
-                .map(
-                  (c, i) => `${i + 1}. ${c.name} (score: ${c.score.toFixed(2)}) - ${c.description}`,
-                )
-                .join('\n');
+      const candidateList = candidates
+        .map((c, i) => `${i + 1}. ${c.name} (score: ${c.score.toFixed(2)}) - ${c.description}`)
+        .join('\n');
 
-              const prompt = `
+      const prompt = `
                 You are a financial transaction classifier.
-                Transaction: "${input.description}"
+                Transaction: "${description}"
 
                 Candidates:
                 ${candidateList}
@@ -162,30 +143,28 @@ export class CategoryService {
                 3. Return the exact category name only, no explanations
               `.trim();
 
-              const response = await this.openAI.getLLM().invoke(prompt);
-              const pickedName = response.trim();
+      const response = await this.openAI.getLLM().invoke(prompt);
+      // eslint-disable-next-line @typescript-eslint/no-base-to-string
+      const pickedName = response.content.toString().trim();
 
-              logger.info(`LLM picked category: "${pickedName}" for "${input.description}"`);
+      logger.info(`LLM picked category: "${pickedName}" for "${description}"`);
 
-              const bestCategory = await this.categoryRepository.findOne({
-                where: { name: pickedName },
-              });
+      const bestCategory = await this.categoryRepository.findOne({
+        where: { name: pickedName },
+      });
 
-              if (!bestCategory) {
-                logger.warn(`Category "${pickedName}" not found in database`);
-                return await this.getUncategorized();
-              }
+      if (!bestCategory) {
+        logger.warn(`Category "${pickedName}" not found in database`);
+        return await this.getUncategorized();
+      }
 
-              return bestCategory;
-            } catch (error) {
-              logger.error(`Error in LLM classification: ${(error as Error).message}`);
-              return await this.getUncategorized();
-            }
-          },
-          { name: 'llm_classification' },
-        ),
-      ),
-    ]);
+      return bestCategory;
+    } catch (error) {
+      logger.error(`Error fetching top-k from vector DB: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Error fetching top-k from vector DB: ${error.message}`,
+      );
+    }
   }
 
   private async getUncategorized(): Promise<Category> {
