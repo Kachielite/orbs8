@@ -1,20 +1,20 @@
 import { Injectable, Module } from '@nestjs/common';
-import { OpenAI } from '@langchain/openai';
+import { ChatOpenAI } from '@langchain/openai';
 import { envConstants } from '../constants/env.secrets';
 
 @Injectable()
 export class OpenAIConfig {
-  private readonly llm: OpenAI;
+  private readonly llm: ChatOpenAI;
 
   constructor() {
-    this.llm = new OpenAI({
+    this.llm = new ChatOpenAI({
       apiKey: envConstants.OPENAI_API_KEY,
       model: 'gpt-3.5-turbo',
       temperature: 0.7,
     });
   }
 
-  getLLM(): OpenAI {
+  getLLM(): ChatOpenAI {
     return this.llm;
   }
 }
