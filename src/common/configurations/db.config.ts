@@ -35,7 +35,7 @@ import { Transaction } from '../../transaction/entities/transaction.entity';
           Transaction,
         ],
         autoLoadEntities: true,
-        synchronize: true,
+        synchronize: true, // Disabled to prevent overriding manual vector schema changes
       }),
     }),
   ],

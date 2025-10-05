@@ -34,12 +34,8 @@ export class Category {
   })
   type: CategoryType;
 
-  // Use a Postgres float array instead of not supported vector type
-  @Column({ type: 'real', array: true, nullable: true })
-  embedding: number[];
-
-  @Column({ nullable: true, type: 'text' })
-  lastEmbeddingText: string;
+  @Column()
+  regex: string;
 
   @CreateDateColumn()
   createdAt: Date;

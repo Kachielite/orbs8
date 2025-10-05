@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, Repository } from 'typeorm';
@@ -9,7 +8,6 @@ import { envConstants } from '../common/constants/env.secrets';
 import { EmbeddingConfig } from '../common/embedding/embedding.config';
 import { PGVectorStore } from '@langchain/community/vectorstores/pgvector';
 import { OpenAIConfig } from '../common/configurations/openai.config';
-import { LangSmithService } from '../langsmith/langsmith.service';
 
 @Injectable()
 export class CategoryService {
@@ -18,10 +16,11 @@ export class CategoryService {
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
     private readonly embeddings: EmbeddingConfig,
     private readonly openAI: OpenAIConfig,
-    private readonly langSmithService: LangSmithService,
   ) {
+    const dbUrl = `postgresql://${envConstants.DB_USERNAME}:${envConstants.DB_PASSWORD}@${envConstants.DB_HOST}:${envConstants.DB_PORT}/${envConstants.DB_NAME}`;
+
     this.store = new PGVectorStore(this.embeddings.getEmbeddings(), {
-      postgresConnectionOptions: { connectionString: process.env.DATABASE_URL },
+      postgresConnectionOptions: { connectionString: dbUrl },
       tableName: 'category',
       columns: {
         idColumnName: 'id',
@@ -73,113 +72,7 @@ export class CategoryService {
     }
   }
 
-  async ensureEmbeddings() {
-    const forceReembed = envConstants.FORCE_REEMBED;
-    const categories = await this.categoryRepository.find();
-
-    for (const cat of categories) {
-      const text = `${cat.name}: ${cat.description}`;
-
-      if (!forceReembed && cat.embedding && cat.lastEmbeddingText === text) {
-        logger.info(`Skipping category: ${cat.name} (no change)`);
-      } else {
-        const [embedding] = await this.embeddings.getEmbeddings().embedDocuments([text]);
-
-        await this.categoryRepository.update(cat.id, {
-          embedding,
-          lastEmbeddingText: text,
-        });
-
-        logger.info(
-          forceReembed
-            ? `♻️ Re-embedded category: ${cat.name}`
-            : `✅ Updated embedding for category: ${cat.name}`,
-        );
-      }
-    }
-  }
-
-  async classifyTransaction(description: string) {
-    const k = 3;
-    const threshold = 0.6;
-    logger.info(`Classifying transaction: ${description}`);
-    try {
-      logger.info(`Fetching top-k from vector DB`);
-      const results = await this.store.similaritySearchWithScore(description, k);
-
-      // Filter results based on a similarity threshold
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const filteredResults = results.filter(([_, score]) => score >= threshold);
-
-      const candidates = filteredResults.map(([doc, score]) => ({
-        id: doc.metadata?.id,
-        name: doc.metadata?.name,
-        description: doc.pageContent,
-        type: doc.metadata?.type,
-        score,
-      }));
-
-      logger.info(`Found ${candidates.length} candidates for "${description}"`);
-
-      if (!candidates.length) {
-        logger.info('No candidates found, returning Uncategorized');
-        return await this.getUncategorized();
-      }
-
-      const candidateList = candidates
-        .map((c, i) => `${i + 1}. ${c.name} (score: ${c.score.toFixed(2)}) - ${c.description}`)
-        .join('\n');
-
-      const prompt = `
-                You are a financial transaction classifier.
-                Transaction: "${description}"
-
-                Candidates:
-                ${candidateList}
-
-                Instructions:
-                1. Pick the single best matching category NAME from the candidates
-                2. If no candidate has a good semantic match, return "Uncategorized"
-                3. Return the exact category name only, no explanations
-              `.trim();
-
-      const response = await this.openAI.getLLM().invoke(prompt);
-      // eslint-disable-next-line @typescript-eslint/no-base-to-string
-      const pickedName = response.content.toString().trim();
-
-      logger.info(`LLM picked category: "${pickedName}" for "${description}"`);
-
-      const bestCategory = await this.categoryRepository.findOne({
-        where: { name: pickedName },
-      });
-
-      if (!bestCategory) {
-        logger.warn(`Category "${pickedName}" not found in database`);
-        return await this.getUncategorized();
-      }
-
-      return bestCategory;
-    } catch (error) {
-      logger.error(`Error fetching top-k from vector DB: ${error.message}`);
-      throw new InternalServerErrorException(
-        `Error fetching top-k from vector DB: ${error.message}`,
-      );
-    }
-  }
-
-  private async getUncategorized(): Promise<Category> {
-    const unCategorizedCategory = await this.categoryRepository.findOne({
-      where: {
-        name: 'Uncategorized',
-      },
-    });
-
-    if (!unCategorizedCategory) {
-      throw new NotFoundException('Uncategorized category not found');
-    }
-
-    return unCategorizedCategory;
-  }
+  async classifyTransaction(description: string) {}
 
   private convertToDto(category: Category): CategoryDto {
     return new CategoryDto(category.id, category.name, category.description, category.icon);
