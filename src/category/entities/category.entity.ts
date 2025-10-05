@@ -34,7 +34,7 @@ export class Category {
   })
   type: CategoryType;
 
-  @Column()
+  @Column({ nullable: true, type: 'text' })
   regex: string;
 
   @CreateDateColumn()
