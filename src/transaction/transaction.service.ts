@@ -12,6 +12,11 @@ import { Category } from '../category/entities/category.entity';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { paginationUtil } from '../common/utils/pagination.util';
 import { CategoryFeedback } from '../category/entities/category-feedback.entity';
+import { OpenAIConfig } from '../common/configurations/openai.config';
+import { StructuredOutputParser } from '@langchain/core/output_parsers';
+import { z, type ZodTypeAny } from 'zod';
+import { ChatPromptTemplate } from '@langchain/core/prompts';
+import { TransactionDetails } from './interface/transaction-details.interface';
 
 @Injectable()
 export class TransactionService {
@@ -24,11 +29,25 @@ export class TransactionService {
     'createdAt',
   ];
 
+  private transactionDetailsSchema: ZodTypeAny = z.object({
+    type: z.enum(['Credit', 'Debit']).describe('Transaction type'),
+    amount: z.number().describe('Transaction amount'),
+    currency: z.string().describe('Transaction currency'),
+    date: z.string().describe('Transaction date in YYYY-MM-DD format'),
+    description: z.string().describe('Transaction description'),
+    currentBalance: z.number().describe('Current account balance'),
+    transactionId: z.string().describe('Transaction ID'),
+    accountNumber: z.string().describe('Account number'),
+    accountName: z.string().describe("Account name, this could also be the recipient's name"),
+    bankName: z.string().describe('Bank name'),
+  });
+
   constructor(
     @InjectRepository(Transaction) private readonly transactionRepository: Repository<Transaction>,
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
     @InjectRepository(CategoryFeedback)
     private readonly categoryFeedbackRepository: Repository<CategoryFeedback>,
+    private readonly openAI: OpenAIConfig,
   ) {}
 
   async findAll(
@@ -222,6 +241,31 @@ export class TransactionService {
     // Validate
     new RegExp(updated, 'i');
     return updated;
+  }
+
+  private async extractTransactionDetails(emailText: string): Promise<TransactionDetails> {
+    const outputParser = StructuredOutputParser.fromZodSchema(
+      <InteropZodType>this.transactionDetailsSchema,
+    );
+
+    const prompt = ChatPromptTemplate.fromTemplate(`
+        You are a financial data extraction assistant. Extract the transaction details from the email below.
+        
+        {format_instructions}
+        
+        Email content:
+        """
+        {emailText}
+        """
+          `);
+
+    const llm = this.openAI.getLLM();
+    const chain = prompt.pipe(llm).pipe(outputParser);
+
+    return (await chain.invoke({
+      emailText,
+      format_instructions: outputParser.getFormatInstructions(),
+    })) as TransactionDetails;
   }
 
   private convertToDto(transaction: Transaction): TransactionDto {
