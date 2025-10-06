@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Transaction } from '../../transaction/entities/transaction.entity';
+import { CategoryFeedback } from './category-feedback.entity';
 
 export enum CategoryType {
   INCOME = 'income',
@@ -45,4 +46,7 @@ export class Category {
 
   @OneToMany(() => Transaction, (transaction) => transaction.category)
   transactions: Transaction[];
+
+  @OneToMany(() => CategoryFeedback, (categoryFeedback) => categoryFeedback.category)
+  categoryFeedbacks: CategoryFeedback[];
 }
