@@ -228,7 +228,7 @@ export class TransactionController {
     description: 'Update fields of a transaction owned by the authenticated user.',
   })
   @ApiParam({ name: 'id', type: Number, description: 'Transaction ID', example: 456 })
-  @ApiBody({ description: 'Fields to update (all optional)', type: UpdateTransactionDto })
+  @ApiBody({ description: 'Transaction details to update', type: UpdateTransactionDto })
   @ApiResponse({
     status: 200,
     description: 'Transaction updated successfully',
@@ -236,19 +236,12 @@ export class TransactionController {
   })
   @ApiResponse({
     status: 400,
-    description: 'Bad Request - Invalid input data',
+    description: 'Bad request',
     schema: {
       type: 'object',
       properties: {
         statusCode: { type: 'number', example: 400 },
-        message: {
-          type: 'array',
-          items: { type: 'string' },
-          example: [
-            'Amount must be a number',
-            'Status must be one of the following: active, paused, cancelled, free_trial',
-          ],
-        },
+        message: { type: 'string', example: 'Invalid input' },
         error: { type: 'string', example: 'Bad Request' },
       },
     },

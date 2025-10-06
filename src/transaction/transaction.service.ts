@@ -11,6 +11,7 @@ import logger from '../common/utils/logger/logger';
 import { Category } from '../category/entities/category.entity';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { paginationUtil } from '../common/utils/pagination.util';
+import { CategoryFeedback } from '../category/entities/category-feedback.entity';
 
 @Injectable()
 export class TransactionService {
@@ -26,6 +27,8 @@ export class TransactionService {
   constructor(
     @InjectRepository(Transaction) private readonly transactionRepository: Repository<Transaction>,
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
+    @InjectRepository(CategoryFeedback)
+    private readonly categoryFeedbackRepository: Repository<CategoryFeedback>,
   ) {}
 
   async findAll(
@@ -120,6 +123,8 @@ export class TransactionService {
     user: Partial<User>,
     updateTransactionDto: UpdateTransactionDto,
   ): Promise<GeneralResponseDto> {
+    const { categoryId, commonName, applyToAll } = updateTransactionDto;
+
     try {
       logger.info(`Updating transaction with ID: ${id}`);
       const transaction = await this.transactionRepository.findOne({
@@ -132,18 +137,43 @@ export class TransactionService {
       }
 
       const category = await this.categoryRepository.findOne({
-        where: { id: updateTransactionDto.categoryId },
+        where: { id: categoryId },
       });
 
       if (!category) {
-        throw new NotFoundException(
-          `Category with ID ${updateTransactionDto.categoryId} not found`,
-        );
+        throw new NotFoundException(`Category with ID ${categoryId} not found`);
       }
 
       await this.transactionRepository.update(id, {
         category: category,
       });
+
+      if (commonName) {
+        // Update regex
+        category.regex = this.appendToRegex(category.regex, commonName);
+        await this.categoryRepository.save(category);
+      }
+
+      if (applyToAll) {
+        if (commonName) {
+          // Create feedback for all transactions with the same category
+          const feedback = this.categoryFeedbackRepository.create({
+            commonName,
+            category,
+            user: transaction.user,
+            appliedToAll: true,
+          });
+          await this.categoryFeedbackRepository.save(feedback);
+        }
+
+        // update all transactions with the same category
+        await this.transactionRepository
+          .createQueryBuilder()
+          .update(Transaction)
+          .set({ category })
+          .where('description ILIKE :pattern', { pattern: `%${commonName}%` })
+          .execute();
+      }
 
       return new GeneralResponseDto('Transaction updated successfully');
     } catch (error) {
@@ -172,6 +202,26 @@ export class TransactionService {
       allowedSortFields: this.allowedSortFields,
       defaultSortField: 'createdAt' as keyof Transaction,
     });
+  }
+
+  private appendToRegex(oldRegex: string | null, newTerm: string): string {
+    const clean = newTerm
+      .trim()
+      .toUpperCase()
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    if (!oldRegex) return `(${clean})`;
+
+    const inner = oldRegex.replace(/^\(|\)$/g, '');
+    const tokens = inner.split('|').map((t) => t.trim());
+
+    if (!tokens.includes(clean)) tokens.push(clean);
+
+    const updated = `(${tokens.join('|')})`;
+
+    // Validate
+    new RegExp(updated, 'i');
+    return updated;
   }
 
   private convertToDto(transaction: Transaction): TransactionDto {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { CategoryService } from './category.service';
 import {
   ApiBearerAuth,
@@ -12,10 +12,6 @@ import {
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { CategoryDto } from './dto/category.dto';
 import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '../auth/entities/user.entity';
-import { UpdateCategoryDto } from './dto/update-category.dto';
-import { GeneralResponseDto } from '../common/dto/general-response.dto';
 
 @ApiTags('Category Management')
 @Controller('category')
@@ -159,71 +155,5 @@ export class CategoryController {
   })
   async classifyTransaction(@Body() request: ClassifyTransactionDto) {
     return await this.categoryService.classifyTransaction(request);
-  }
-
-  @Put()
-  @ApiOperation({
-    summary: 'Update a category',
-    description: 'Updates an category of an existing transaction.',
-  })
-  @ApiBody({
-    description: 'Category details to update',
-    type: UpdateCategoryDto,
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Category updated successfully',
-    type: GeneralResponseDto,
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad request',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 400 },
-        message: { type: 'string', example: 'Invalid input' },
-        error: { type: 'string', example: 'Bad Request' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Unauthorized - Invalid credentials',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 401 },
-        message: { type: 'string', example: 'Invalid credentials' },
-        error: { type: 'string', example: 'Unauthorized' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 403,
-    description: 'Forbidden - Invalid credentials',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 401 },
-        message: { type: 'string', example: 'You are not authorized to perform this action.' },
-        error: { type: 'string', example: 'Forbidden' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Internal Server Error',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 500 },
-        message: { type: 'string', example: 'An error occurred during login' },
-        error: { type: 'string', example: 'Internal Server Error' },
-      },
-    },
-  })
-  async updateCategory(@Body() request: UpdateCategoryDto, @CurrentUser() user: Partial<User>) {
-    return await this.categoryService.update(request, user);
   }
 }

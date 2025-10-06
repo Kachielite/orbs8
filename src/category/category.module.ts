@@ -5,11 +5,9 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Category } from './entities/category.entity';
 import { OpenAIConfig } from '../common/configurations/openai.config';
 import { CategoryFeedback } from './entities/category-feedback.entity';
-import { Transaction } from '../transaction/entities/transaction.entity';
-import { User } from '../auth/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Category, CategoryFeedback, Transaction, User])],
+  imports: [TypeOrmModule.forFeature([Category, CategoryFeedback])],
   controllers: [CategoryController],
   providers: [CategoryService, OpenAIConfig],
 })

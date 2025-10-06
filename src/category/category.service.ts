@@ -1,7 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-return */
 import {
   BadRequestException,
-  ForbiddenException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -21,11 +20,7 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
 import { createRetrievalChain } from 'langchain/chains/retrieval';
 import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
-import { UpdateCategoryDto } from './dto/update-category.dto';
-import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { CategoryFeedback } from './entities/category-feedback.entity';
-import { Transaction } from '../transaction/entities/transaction.entity';
-import { User } from '../auth/entities/user.entity';
 
 @Injectable()
 export class CategoryService {
@@ -34,9 +29,6 @@ export class CategoryService {
   constructor(
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
     @InjectRepository(CategoryFeedback)
-    private readonly categoryFeedbackRepository: Repository<CategoryFeedback>,
-    @InjectRepository(Transaction) private readonly transactionRepository: Repository<Transaction>,
-    @InjectRepository(User) private readonly userRepository: Repository<User>,
     private readonly openAI: OpenAIConfig,
   ) {
     this.dbOptions = {
@@ -87,82 +79,6 @@ export class CategoryService {
       }
       throw new InternalServerErrorException(
         `Error fetching category with ID: ${id}: ${(error as Error).message}`,
-      );
-    }
-  }
-
-  async update(request: UpdateCategoryDto, user: Partial<User>): Promise<GeneralResponseDto> {
-    try {
-      logger.info(`Received update request: ${JSON.stringify(request)}`);
-      const { transactionId, categoryId, commonName, applyToAll } = request;
-
-      // Fetch user
-      const owner = await this.userRepository.findOneBy({
-        id: user.id,
-      });
-
-      // Fetch category by ID
-      const category = await this.categoryRepository.findOne({
-        where: { id: categoryId },
-      });
-
-      if (!category) {
-        throw new BadRequestException(`Category with ID ${categoryId} not found`);
-      }
-
-      // Fetch transaction by ID
-      const transaction = await this.transactionRepository.findOne({
-        where: { id: transactionId },
-        relations: ['user'],
-      });
-
-      if (!transaction) {
-        throw new BadRequestException(`Transaction with ID ${transactionId} not found`);
-      }
-
-      if (transaction.user.id !== owner?.id) {
-        throw new ForbiddenException(`You are not authorized to update this transaction`);
-      }
-
-      // Update transaction category
-      transaction.category = category;
-      await this.transactionRepository.save(transaction);
-
-      if (commonName) {
-        // Update regex
-        category.regex = this.appendToRegex(category.regex, commonName);
-        await this.categoryRepository.save(category);
-      }
-
-      if (applyToAll) {
-        if (commonName) {
-          // Create feedback for all transactions with the same category
-          const feedback = this.categoryFeedbackRepository.create({
-            commonName,
-            category,
-            user: owner,
-            appliedToAll: true,
-          });
-          await this.categoryFeedbackRepository.save(feedback);
-        }
-
-        // update all transactions with the same category
-        await this.transactionRepository
-          .createQueryBuilder()
-          .update(Transaction)
-          .set({ category })
-          .where('description ILIKE :pattern', { pattern: `%${commonName}%` })
-          .execute();
-      }
-
-      return new GeneralResponseDto('Category updated successfully');
-    } catch (error) {
-      logger.error(`Error updating category: ${(error as Error).message}`);
-      if (error instanceof BadRequestException || error instanceof ForbiddenException) {
-        throw error;
-      }
-      throw new InternalServerErrorException(
-        `Error updating category: ${(error as Error).message}`,
       );
     }
   }
@@ -340,26 +256,6 @@ export class CategoryService {
 
   private convertToDto(category: Category): CategoryDto {
     return new CategoryDto(category.id, category.name, category.description, category.icon);
-  }
-
-  private appendToRegex(oldRegex: string | null, newTerm: string): string {
-    const clean = newTerm
-      .trim()
-      .toUpperCase()
-      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-    if (!oldRegex) return `(${clean})`;
-
-    const inner = oldRegex.replace(/^\(|\)$/g, '');
-    const tokens = inner.split('|').map((t) => t.trim());
-
-    if (!tokens.includes(clean)) tokens.push(clean);
-
-    const updated = `(${tokens.join('|')})`;
-
-    // Validate
-    new RegExp(updated, 'i');
-    return updated;
   }
 
   private getPrompt() {
