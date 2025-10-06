@@ -11,6 +11,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { CategoryDto } from './dto/category.dto';
+import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
 
 @ApiTags('Category Management')
 @Controller('category')
@@ -121,25 +122,12 @@ export class CategoryController {
   })
   @ApiBody({
     description: 'Transaction description to classify',
-    type: 'object',
-    schema: {
-      type: 'object',
-      properties: {
-        desc: { type: 'string', example: 'Uber ride to airport' },
-      },
-      required: ['desc'],
-    },
+    type: ClassifyTransactionDto,
   })
   @ApiResponse({
     status: 200,
     description: 'Classification result',
-    schema: {
-      type: 'object',
-      properties: {
-        category: { type: 'string', example: 'Transport' },
-        confidence: { type: 'number', example: 0.95 },
-      },
-    },
+    type: CategoryDto,
   })
   @ApiResponse({
     status: 400,
@@ -165,7 +153,7 @@ export class CategoryController {
       },
     },
   })
-  classifyTransaction(@Body() body: { desc: string }) {
-    return this.categoryService.classifyTransaction(body.desc);
+  classifyTransaction(@Body() request: ClassifyTransactionDto) {
+    return this.categoryService.classifyTransaction(request);
   }
 }

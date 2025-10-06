@@ -19,6 +19,7 @@ import { OpenAIEmbeddings } from '@langchain/openai';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
 import { createRetrievalChain } from 'langchain/chains/retrieval';
+import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
 
 @Injectable()
 export class CategoryService {
@@ -80,8 +81,10 @@ export class CategoryService {
     }
   }
 
-  async classifyTransaction(description: string): Promise<CategoryDto> {
+  async classifyTransaction(request: ClassifyTransactionDto): Promise<CategoryDto> {
     try {
+      logger.info(`Classifying transaction: ${JSON.stringify(request)}`);
+      const { description } = request;
       const docs = await this.loadDCategories();
       const retriever = await this.getRetriever(docs);
       const llm = this.openAI.getLLM();
@@ -210,6 +213,7 @@ export class CategoryService {
     let existingCount = 0;
     if (tableExists) {
       const countResult = await dataSource.query(`SELECT COUNT(*) FROM langchain_pg_embedding;`);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       existingCount = parseInt(countResult?.[0]?.count || '0', 10);
     }
 
