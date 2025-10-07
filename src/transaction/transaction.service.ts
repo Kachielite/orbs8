@@ -1,5 +1,10 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Transaction } from './entities/transaction.entity';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
+import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -17,6 +22,11 @@ import { StructuredOutputParser } from '@langchain/core/output_parsers';
 import { z, type ZodTypeAny } from 'zod';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { TransactionDetails } from './interface/transaction-details.interface';
+import { InteropZodType } from '@langchain/core/utils/types';
+import { Currency } from '../currency/entities/currency.entity';
+import { Bank } from '../bank/entities/bank.entity';
+import { Account } from '../account/entities/account.entity';
+import { CategoryService } from '../category/category.service';
 
 @Injectable()
 export class TransactionService {
@@ -47,7 +57,12 @@ export class TransactionService {
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
     @InjectRepository(CategoryFeedback)
     private readonly categoryFeedbackRepository: Repository<CategoryFeedback>,
+    @InjectRepository(User) private readonly userRepository: Repository<User>,
+    @InjectRepository(Currency) private readonly currencyRepository: Repository<Currency>,
+    @InjectRepository(Bank) private readonly bankRepository: Repository<Bank>,
+    @InjectRepository(Account) private readonly accountRepository: Repository<Account>,
     private readonly openAI: OpenAIConfig,
+    private readonly categoryService: CategoryService,
   ) {}
 
   async findAll(
@@ -133,6 +148,118 @@ export class TransactionService {
       logger.error(`Error fetching transactions for account ${accountId}: ${error.message}`);
       throw new InternalServerErrorException(
         `Error fetching transactions for account ${accountId}: ${error.message}`,
+      );
+    }
+  }
+
+  async create(user: Partial<User>, emailText: string): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Creating transaction for user: ${user.id}`);
+
+      // Extract transaction details from the email
+      const transactionDetails = await this.extractTransactionDetails(emailText);
+      const {
+        type,
+        amount,
+        currency,
+        date,
+        description,
+        currentBalance,
+        transactionId,
+        accountNumber,
+        accountName,
+        bankName,
+      } = transactionDetails;
+
+      // Find user
+      const requestOwner = await this.userRepository.findOne({ where: { id: user.id } });
+      if (!requestOwner) throw new NotFoundException(`User with ID ${user.id} not found`);
+
+      // find existing transaction
+      const tranID = transactionId || new Date(date).toISOString();
+      const existingTransaction = await this.transactionRepository.findOne({
+        where: {
+          transactionID: tranID,
+          user: { id: user.id },
+          account: { accountName: accountName, accountNumber: accountNumber },
+        },
+      });
+      if (existingTransaction) {
+        throw new ConflictException(`Transaction with ID ${tranID} already exists`);
+      }
+
+      // Find currency
+      let currencyEntity: Currency | null;
+      const curr = await this.currencyRepository.findOne({
+        where: { name: currency },
+      });
+      if (!currency) {
+        currencyEntity = this.currencyRepository.create({ code: 'USD' });
+      } else {
+        currencyEntity = curr; // Only assign if the currency exists
+      }
+
+      // Find bank
+      let bankEntity: Bank | null;
+      const bank = await this.bankRepository.findOne({
+        where: { name: bankName },
+      });
+      if (!bank) {
+        const newBank = this.bankRepository.create({ name: bankName });
+        bankEntity = await this.bankRepository.save(newBank);
+      } else {
+        bankEntity = bank; // Only assign if a bank exists
+      }
+
+      // Find Account
+      let accountEntity: Account | null;
+      const account = await this.accountRepository.findOne({
+        where: { accountNumber, accountName, user: { id: user.id } },
+      });
+      if (!account) {
+        const newAccount = this.accountRepository.create({
+          accountName,
+          accountNumber,
+          currentBalance,
+          user: requestOwner,
+          bank: bankEntity,
+          currency: currencyEntity!,
+        });
+        accountEntity = await this.accountRepository.save(newAccount);
+      } else {
+        accountEntity = account; // Only assign if account exists
+      }
+
+      // Find category
+      const category = await this.categoryService.classifyTransaction({ description });
+      const categoryEntity = await this.categoryRepository.findOne({
+        where: { id: category.id },
+      });
+
+      // Create transaction
+      const newTransaction = this.transactionRepository.create({
+        amount,
+        type:
+          TransactionType[type.toUpperCase() as keyof typeof TransactionType] ||
+          TransactionType.OTHER,
+        description,
+        transactionDate: new Date(date),
+        transactionID: tranID,
+        user: requestOwner,
+        category: categoryEntity!,
+        account: accountEntity,
+        currency: currencyEntity!,
+      });
+      await this.transactionRepository.save(newTransaction);
+
+      return new GeneralResponseDto(`Transaction created successfully`);
+    } catch (error) {
+      logger.error(`Error creating transaction for user ${user.id}: ${error.message}`);
+      if (error instanceof NotFoundException || error instanceof ConflictException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Error creating transaction for user ${user.id}: ${error.message}`,
       );
     }
   }
@@ -245,7 +372,7 @@ export class TransactionService {
 
   private async extractTransactionDetails(emailText: string): Promise<TransactionDetails> {
     const outputParser = StructuredOutputParser.fromZodSchema(
-      <InteropZodType>this.transactionDetailsSchema,
+      <InteropZodType>(<unknown>this.transactionDetailsSchema),
     );
 
     const prompt = ChatPromptTemplate.fromTemplate(`

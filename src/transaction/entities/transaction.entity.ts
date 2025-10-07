@@ -41,6 +41,9 @@ export class Transaction {
   description: string;
 
   @Column()
+  transactionID: string;
+
+  @Column()
   transactionDate: Date;
 
   @CreateDateColumn()

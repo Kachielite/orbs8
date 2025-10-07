@@ -23,6 +23,9 @@ export class Account {
   @Column()
   accountNumber: string;
 
+  @Column()
+  currentBalance: number;
+
   @CreateDateColumn()
   createdAt: Date;
 

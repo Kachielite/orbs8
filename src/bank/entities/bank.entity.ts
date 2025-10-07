@@ -9,9 +9,6 @@ export class Bank {
   @Column()
   name: string;
 
-  @Column()
-  domain: string;
-
   @OneToMany(() => Account, (account) => account.bank)
   accounts: Account[];
 }

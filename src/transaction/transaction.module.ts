@@ -5,10 +5,17 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Category } from '../category/entities/category.entity';
 import { Transaction } from './entities/transaction.entity';
 import { CategoryFeedback } from '../category/entities/category-feedback.entity';
+import { OpenAIConfig } from '../common/configurations/openai.config';
+import { Currency } from '../currency/entities/currency.entity';
+import { Bank } from '../bank/entities/bank.entity';
+import { Account } from '../account/entities/account.entity';
+import { CategoryService } from '../category/category.service';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Transaction, Category, CategoryFeedback])],
+  imports: [
+    TypeOrmModule.forFeature([Transaction, Category, CategoryFeedback, Currency, Bank, Account]),
+  ],
   controllers: [TransactionController],
-  providers: [TransactionService],
+  providers: [TransactionService, OpenAIConfig, CategoryService],
 })
 export class TransactionModule {}
