@@ -10,10 +10,19 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
+import { User } from '../auth/entities/user.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Transaction, Category, CategoryFeedback, Currency, Bank, Account]),
+    TypeOrmModule.forFeature([
+      Transaction,
+      Category,
+      CategoryFeedback,
+      Currency,
+      Bank,
+      Account,
+      User,
+    ]),
   ],
   controllers: [TransactionController],
   providers: [TransactionService, OpenAIConfig, CategoryService],
