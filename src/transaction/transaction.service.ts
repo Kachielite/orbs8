@@ -185,7 +185,7 @@ export class TransactionService {
         },
       });
       if (existingTransaction) {
-        throw new ConflictException(`Transaction with ID ${tranID} already exists`);
+        return new GeneralResponseDto('Transaction already exists, skipping creation');
       }
 
       // Find currency

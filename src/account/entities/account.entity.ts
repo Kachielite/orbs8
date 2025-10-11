@@ -23,7 +23,7 @@ export class Account {
   @Column()
   accountNumber: string;
 
-  @Column()
+  @Column({ type: 'decimal', precision: 15, scale: 2, default: 0 })
   currentBalance: number;
 
   @CreateDateColumn()

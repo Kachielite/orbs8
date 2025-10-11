@@ -13,7 +13,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 
 @Injectable()
 export class EmailService {
-  private oauth2Client: OAuth2Client;
+  private readonly oauth2Client: OAuth2Client;
   private SCOPES = [
     'https://www.googleapis.com/auth/gmail.readonly', // read-only
     'https://www.googleapis.com/auth/userinfo.email',
@@ -61,53 +61,35 @@ export class EmailService {
         throw new BadRequestException('Failed to obtain access token');
       }
 
-      // Check expiry_date is defined
-      if (!accessData.tokens.expiry_date) {
-        // Try to refresh the token if refresh_token is available
-        if (accessData.tokens.refresh_token) {
-          try {
-            this.oauth2Client.setCredentials({ refresh_token: accessData.tokens.refresh_token });
-            // Use getToken to refresh all token fields
-            const refreshed = await this.oauth2Client.getToken(accessData.tokens.refresh_token);
-            if (!refreshed.tokens.access_token || !refreshed.tokens.expiry_date) {
-              throw new BadRequestException(
-                'Failed to refresh token: access token or expiry date missing',
-              );
-            }
-            accessData.tokens = { ...accessData.tokens, ...refreshed.tokens };
-          } catch (refreshError) {
-            const message =
-              refreshError instanceof Error ? refreshError.message : String(refreshError);
-            logger.error(`Failed to refresh Google OAuth token: ${message}`);
-            throw new BadRequestException('Failed to refresh Google OAuth token');
-          }
-        } else {
-          throw new BadRequestException(
-            'Token expiry date is missing and no refresh token available',
-          );
-        }
-      }
-
       // Check if email tokens already exist for the user
       const existingEmail = await this.emailRepository.findOne({
         where: { user: { id: user.id } as User, provider: EmailProvider.GMAIL },
         relations: ['user'],
       });
 
-      if (existingEmail) {
-        return new GeneralResponseDto('Gmail access already obtained');
-      }
-
       // Save token details
       logger.info('Gmail access obtained, saving token details');
       const expiresAtValue = accessData.tokens.expiry_date
         ? new Date(accessData.tokens.expiry_date)
         : null;
+
+      if (existingEmail) {
+        // update access and refresh token
+        this.emailRepository.merge(existingEmail, {
+          lastSyncAt: new Date(),
+          accessToken: accessData.tokens.access_token!,
+          refreshToken: accessData.tokens.refresh_token,
+          expiresAt: expiresAtValue!,
+        });
+
+        return new GeneralResponseDto('Gmail access updated successfully');
+      }
+
       const newEmailAccess = this.emailRepository.create({
         user: { id: user.id } as User,
         provider: EmailProvider.GMAIL,
-        accessToken: accessData.tokens.access_token!,
-        refreshToken: accessData.tokens.refresh_token ?? null,
+        accessToken: accessData.tokens.access_token,
+        refreshToken: accessData.tokens.refresh_token,
         expiresAt: expiresAtValue,
       } as DeepPartial<Email>);
 
@@ -153,10 +135,16 @@ export class EmailService {
       // Set syncStatus to PENDING before queuing the job
       await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
       // get label name
-      const labelName = await this.emailRepository.find({
+      const emailEntity = await this.emailRepository.find({
         where: { user: { id: user.id } as User },
         relations: ['user'],
       });
+
+      const labelName = emailEntity[0]?.labelName;
+
+      if (!labelName) {
+        throw new BadRequestException('Email label not set. Please verify label access first.');
+      }
 
       // Add job to the queue
       await this.emailSyncQueue.add('sync-emails', {
@@ -186,11 +174,31 @@ export class EmailService {
       if (!emailEntity) {
         throw new BadRequestException('Email not linked');
       }
+      const now = Date.now();
+      const expiresAtMillis = emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined;
       this.oauth2Client.setCredentials({
         access_token: emailEntity.accessToken,
         refresh_token: emailEntity.refreshToken ?? undefined,
-        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
+        expiry_date: expiresAtMillis,
       });
+
+      const isAccessTokenMissing = !emailEntity.accessToken;
+      const isExpired =
+        typeof expiresAtMillis === 'number' ? expiresAtMillis <= now - 60_000 : false;
+      const shouldRefresh = isAccessTokenMissing || isExpired;
+
+      if (shouldRefresh) {
+        if (!emailEntity.refreshToken) {
+          logger.warn(`Refresh token missing for user ${user.id}`);
+          throw new BadRequestException(
+            'Gmail access has expired. Please reconnect your email account.',
+          );
+        }
+
+        logger.info(`Refreshing Gmail access token for user: ${user.id}`);
+        await this.refreshGmailAccessToken(user.id as number, emailEntity);
+      }
+
       const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
       // Verify access to the email account
       await gmail.users.getProfile({ userId: 'me' });
@@ -216,6 +224,14 @@ export class EmailService {
       return new GeneralResponseDto(`Access to email label: ${labelName} verified`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('invalid_grant')) {
+        logger.warn(
+          `Invalid grant detected while verifying label for user ${user.id}. Prompting re-authorization.`,
+        );
+        throw new BadRequestException(
+          'Gmail access has been revoked. Please reconnect your email account.',
+        );
+      }
       logger.error(`Failed to verify access to email label: ${message}`);
       throw new BadRequestException(
         `Failed to verify access to the email label. Please ensure the label exists in Gmail and the spelling matches exactly.`,
@@ -265,5 +281,49 @@ export class EmailService {
       await this.emailRepository.save(emailEntity);
     }
     return;
+  }
+
+  private async refreshGmailAccessToken(userId: number, emailEntity: Email) {
+    try {
+      this.oauth2Client.setCredentials({
+        refresh_token: emailEntity.refreshToken,
+      });
+
+      const { credentials } = await this.oauth2Client.refreshAccessToken();
+
+      // Update local copy
+      emailEntity.accessToken = credentials.access_token ?? emailEntity.accessToken;
+      if (credentials.expiry_date) {
+        emailEntity.expiresAt = new Date(credentials.expiry_date);
+      }
+      if (credentials.refresh_token) {
+        // Occasionally Google rotates refresh tokens; store new one if provided
+        emailEntity.refreshToken = credentials.refresh_token;
+      }
+
+      await this.emailRepository.save(emailEntity);
+
+      // Reapply updated credentials
+      this.oauth2Client.setCredentials({
+        access_token: emailEntity.accessToken,
+        refresh_token: emailEntity.refreshToken,
+        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
+      });
+
+      logger.info(`✅ Refreshed Gmail token successfully for user ${userId}`);
+      return emailEntity;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`❌ Failed to refresh Gmail token for user ${userId}: ${message}`);
+
+      // When refresh token becomes invalid — must reauthorize
+      if (message.includes('invalid_grant')) {
+        throw new BadRequestException(
+          'Gmail connection expired or revoked. Please reconnect your email account.',
+        );
+      }
+
+      throw new BadRequestException('Failed to refresh Gmail token.');
+    }
   }
 }

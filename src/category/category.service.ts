@@ -20,7 +20,6 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { createStuffDocumentsChain } from 'langchain/chains/combine_documents';
 import { createRetrievalChain } from 'langchain/chains/retrieval';
 import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
-import { CategoryFeedback } from './entities/category-feedback.entity';
 
 @Injectable()
 export class CategoryService {
@@ -28,7 +27,6 @@ export class CategoryService {
 
   constructor(
     @InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
-    @InjectRepository(CategoryFeedback)
     private readonly openAI: OpenAIConfig,
   ) {
     this.dbOptions = {

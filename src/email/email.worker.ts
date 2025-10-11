@@ -4,12 +4,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Email, EmailSyncStatus } from './entities/email.entity';
 import { User } from '../auth/entities/user.entity';
-import { gmail_v1, google } from 'googleapis';
+import { google } from 'googleapis';
 import { envConstants } from '../common/constants/env.secrets';
-import * as crypto from 'crypto';
 import logger from '../common/utils/logger/logger';
 import { BadRequestException } from '@nestjs/common';
 import { JobPayloadInterface } from './interface/job-payload.interface';
+import { TransactionService } from '../transaction/transaction.service';
 
 interface ParsedSubscription {
   service_name: string | null;
@@ -30,104 +30,175 @@ export class EmailWorker extends WorkerHost {
     private readonly emailRepository: Repository<Email>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    private readonly transactionService: TransactionService,
   ) {
     super();
   }
 
   async process(job: Job) {
-    logger.info(`Processing job ${job.id} with data ${JSON.stringify(job.data)}`);
-    const userId = (job.data as JobPayloadInterface).userId;
-    const labelName = (job.data as JobPayloadInterface).labelName;
+    try {
+      const userId = (job.data as JobPayloadInterface).userId;
+      const labelName = (job.data as JobPayloadInterface).labelName;
 
-    // 1. Find user entity first to get the correct type for TypeORM
-    const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
-    if (!user) throw new BadRequestException(`User with ID ${userId} not found`);
-    logger.info(`Processing job for user ${user.id}`);
+      logger.info(
+        `Start job ${job.id} for user: ${userId} to sync emails with label: ${labelName}`,
+      );
 
-    // 2. Fetch user's email credentials
-    const emailEntity = await this.emailRepository.findOne({
-      where: { user: user },
-      relations: ['user'],
-    });
-    if (!emailEntity) throw new BadRequestException('Email credentials not found for user');
-    logger.info(`Using email credentials for user ${user.id}`);
+      // 1. Find user entity first to get the correct type for TypeORM
+      const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
+      if (!user) throw new BadRequestException(`User with ID ${userId} not found`);
+      logger.info(`Found user details for ${user.id}`);
 
-    // 3. Setup Gmail API client
-    const oauth2Client = new google.auth.OAuth2(
-      envConstants.GOOGLE_CLIENT_ID,
-      envConstants.GOOGLE_CLIENT_SECRET,
-      envConstants.GOOGLE_REDIRECT_URI,
-    );
-    oauth2Client.setCredentials({
-      access_token: emailEntity.accessToken,
-      refresh_token: emailEntity.refreshToken,
-    });
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-    logger.info(`Gmail API client setup for user ${user.id}`);
-
-    // 4. Get label ID for the subscription label
-    logger.info(`Getting label ID for subscription label ${labelName}`);
-    const labelsRes = await gmail.users.labels.list({ userId: 'me' });
-    const labels = labelsRes.data.labels || [];
-    const label = labels.find((l) => l.name === labelName);
-    if (!label || !label.id)
-      throw new BadRequestException(`Label '${labelName}' not found in user's Gmail`);
-    const labelId: string = label.id;
-    logger.info(`Found label ID ${labelId} for label name ${labelName}`);
-
-    // 5. Fetch emails with the subscription label
-    logger.info(`Fetching emails with label ID ${labelId} for user ${user.id}`);
-    const messagesRes = await gmail.users.messages.list({
-      userId: 'me',
-      labelIds: [labelId],
-      maxResults: 10,
-    });
-    const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages : [];
-    logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
-
-    // 6. Process each email and extract subscription details
-    const results: Array<Record<string, unknown>> = [];
-    logger.info(
-      `Extracting subscription details from ${messages.length} emails for user ${user.id}`,
-    );
-
-    const jobProgress = messages.length;
-
-    for (const m of messages) {
-      if (!m.id) continue;
-      const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
-      const msg = msgRes.data;
-      const parsed = this.parseSubscriptionEmail(msg);
-      if (!parsed) continue;
-      results.push({
-        user_id: user.id,
-        service_name: parsed.service_name,
-        status: parsed.status,
-        billing_cycle: parsed.billing_cycle,
-        amount: parsed.amount,
-        currency: parsed.currency,
-        next_payment_date: parsed.next_payment_date,
-        trial_end_date: parsed.trial_end_date,
-        hashed_message_id: crypto.createHash('sha256').update(m.id).digest('hex'),
-        message_date: msg.internalDate ? new Date(Number(msg.internalDate)) : null,
-        extraction_method: parsed.method,
-        extraction_confidence: parsed.confidence,
-        created_at: new Date(),
-        updated_at: new Date(),
+      // 2. Fetch user's email credentials
+      const emailEntity = await this.emailRepository.findOne({
+        where: { user: { id: user.id } },
       });
-      const progress = Math.round(((messages.length - messages.indexOf(m)) / jobProgress) * 100);
-      await job.updateProgress(progress);
-    }
-    logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
+      if (!emailEntity) throw new BadRequestException('Email credentials not found for user');
+      logger.info(`Using email credentials for user ${user.id}`);
 
-    // 7. update last sync and email received
-    logger.info(`Updating last sync and email received for user ${user.id}`);
-    emailEntity.lastSyncAt = new Date();
-    emailEntity.emailsReceived = messages.length;
-    await this.emailRepository.save(emailEntity);
-    // 6. Save or process results as needed
-    // await this.saveExtractedSubscriptions(results);
-    return results;
+      // 3. Setup Gmail API client with token refresh helper
+      const oauth2Client = new google.auth.OAuth2(
+        envConstants.GOOGLE_CLIENT_ID,
+        envConstants.GOOGLE_CLIENT_SECRET,
+        envConstants.GOOGLE_REDIRECT_URI,
+      );
+
+      // Helper function to refresh token
+      const refreshTokenIfNeeded = async () => {
+        const now = new Date();
+        // Refresh if token expires within 5 minutes
+        if (emailEntity.expiresAt <= new Date(now.getTime() + 5 * 60 * 1000)) {
+          logger.info(`Access token expired or expiring soon for user ${user.id}, refreshing...`);
+          try {
+            const { credentials } = await oauth2Client.refreshAccessToken();
+            emailEntity.accessToken = credentials.access_token!;
+            if (credentials.expiry_date) {
+              emailEntity.expiresAt = new Date(credentials.expiry_date);
+            }
+            if (credentials.refresh_token) {
+              emailEntity.refreshToken = credentials.refresh_token;
+            }
+            await this.emailRepository.save(emailEntity);
+            logger.info(`Access token refreshed successfully for user ${user.id}`);
+
+            // Update oauth2Client with new token
+            oauth2Client.setCredentials({
+              access_token: credentials.access_token,
+              refresh_token: credentials.refresh_token || emailEntity.refreshToken,
+            });
+          } catch (refreshError) {
+            logger.error(`Failed to refresh token for user ${user.id}: ${refreshError.message}`);
+            throw new BadRequestException('Failed to refresh access token. Please re-authenticate.');
+          }
+        } else {
+          oauth2Client.setCredentials({
+            access_token: emailEntity.accessToken,
+            refresh_token: emailEntity.refreshToken,
+          });
+        }
+      };
+
+      await refreshTokenIfNeeded();
+
+      const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+      logger.info(`Gmail API client setup for user: ${user.id}`);
+
+      // 4. Get label ID for the subscription label
+      logger.info(`Getting label ID for subscription label: ${labelName}`);
+      let labelsRes;
+      try {
+        labelsRes = await gmail.users.labels.list({ userId: 'me' });
+      } catch (labelError) {
+        if (labelError.code === 403 || labelError.status === 403) {
+          logger.warn(`Got 403 error, attempting token refresh for user ${user.id}`);
+          await refreshTokenIfNeeded();
+          labelsRes = await gmail.users.labels.list({ userId: 'me' });
+        } else {
+          throw labelError;
+        }
+      }
+      const labels = labelsRes.data.labels || [];
+      const label = labels.find((l) => l.name === labelName);
+      if (!label || !label.id)
+        throw new BadRequestException(`Label '${labelName}' not found in user's Gmail`);
+      const labelId: string = label.id;
+      logger.info(`Found label ID ${labelId} for label name ${labelName}`);
+
+      // 5. Fetch emails with the subscription label
+      let messagesRes;
+      try {
+        messagesRes = await gmail.users.messages.list({
+          userId: 'me',
+          labelIds: [labelId],
+          q: `newer_than:7d`,
+          maxResults: 10,
+        });
+      } catch (listError) {
+        if (listError.code === 403 || listError.status === 403) {
+          logger.warn(`Got 403 error on messages.list, attempting token refresh for user ${user.id}`);
+          await refreshTokenIfNeeded();
+          messagesRes = await gmail.users.messages.list({
+            userId: 'me',
+            labelIds: [labelId],
+            q: `newer_than:7d`,
+            maxResults: 10,
+          });
+        } else {
+          throw listError;
+        }
+      }
+      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages : [];
+      logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
+
+      // 6. Process each email and extract subscription details
+      const results: Array<Record<string, unknown>> = [];
+      logger.info(
+        `Extracting subscription details from ${messages.length} emails for user ${user.id}`,
+      );
+
+      const jobProgress = messages.length;
+
+      for (const m of messages) {
+        if (!m.id) continue;
+
+        try {
+          // Fetch the full message details using the `get` method
+          const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
+          const msg = msgRes.data;
+
+          await this.transactionService.create(user, JSON.stringify(msg));
+          const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
+          await job.updateProgress(progress);
+        } catch (msgError) {
+          if (msgError.code === 403 || msgError.status === 403) {
+            logger.warn(`Got 403 error on message ${m.id}, attempting token refresh for user ${user.id}`);
+            await refreshTokenIfNeeded();
+            // Retry the message fetch
+            const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
+            const msg = msgRes.data;
+            await this.transactionService.create(user, JSON.stringify(msg));
+            const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
+            await job.updateProgress(progress);
+          } else {
+            logger.error(`Error processing message ${m.id}: ${msgError.message}`);
+            // Continue with next message instead of failing entire job
+          }
+        }
+      }
+      logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
+
+      // 7. update last sync and email received
+      logger.info(`Updating last sync and email received for user ${user.id}`);
+      emailEntity.lastSyncAt = new Date();
+      emailEntity.emailsReceived = messages.length;
+      await this.emailRepository.save(emailEntity);
+      // 6. Save or process results as needed
+      // await this.saveExtractedSubscriptions(results);
+      return results;
+    } catch (e) {
+      logger.error(`Email worker process error: ${e.message}`, e);
+      throw e;
+    }
   }
 
   @OnWorkerEvent('active')
@@ -181,99 +252,5 @@ export class EmailWorker extends WorkerHost {
     emailEntity.syncStatus = EmailSyncStatus.FAILED;
     emailEntity.failedReason = err.message;
     await this.emailRepository.save(emailEntity);
-  }
-
-  // Improved parser: uses general regexes to extract fields from subject and body
-  private parseSubscriptionEmail(msg: gmail_v1.Schema$Message): ParsedSubscription | null {
-    // Extract headers and body
-    const payload = msg.payload;
-    const headers = Array.isArray(payload?.headers) ? payload.headers : [];
-    const subjectHeader = headers.find((h) => h && h.name === 'Subject');
-    const fromHeader = headers.find((h) => h && h.name === 'From');
-    const subject =
-      subjectHeader && typeof subjectHeader.value === 'string' ? subjectHeader.value : '';
-    const from = fromHeader && typeof fromHeader.value === 'string' ? fromHeader.value : '';
-
-    // Get plain text body (if available)
-    let body = '';
-    if (Array.isArray(payload?.parts)) {
-      const textPart = payload.parts.find((p) => p && p.mimeType === 'text/plain');
-      if (textPart && textPart.body && typeof textPart.body.data === 'string') {
-        body = Buffer.from(textPart.body.data, 'base64').toString('utf-8');
-      }
-    } else if (payload?.body && typeof payload.body.data === 'string') {
-      body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
-    }
-    const text = `${subject}\n${body}`;
-
-    // Service name: try to infer from sender or subject
-    let service_name: string | null = null;
-    const knownServices = [
-      { name: 'Netflix', pattern: /netflix/i },
-      { name: 'Spotify', pattern: /spotify/i },
-      { name: 'Apple', pattern: /apple/i },
-      { name: 'Amazon', pattern: /amazon/i },
-      { name: 'YouTube', pattern: /youtube/i },
-      { name: 'Hulu', pattern: /hulu/i },
-      { name: 'Disney', pattern: /disney/i },
-      // Add more as needed
-    ];
-    for (const svc of knownServices) {
-      if (
-        (typeof from === 'string' && svc.pattern.test(from)) ||
-        (typeof subject === 'string' && svc.pattern.test(subject))
-      ) {
-        service_name = svc.name;
-        break;
-      }
-    }
-    if (!service_name) {
-      // Try to extract from subject (e.g., 'Your Acme subscription')
-      const subjMatch =
-        typeof subject === 'string' ? subject.match(/your (.*?) subscription/i) : null;
-      if (subjMatch && subjMatch[1]) service_name = String(subjMatch[1]);
-    }
-
-    // Amount and currency
-    const amountMatch = text.match(/(?:\$|USD|EUR|GBP|₦|NGN)?\s?([0-9]+(?:\.[0-9]{2})?)/i);
-    const currencyMatch = text.match(/(USD|EUR|GBP|₦|NGN|dollars|euros|pounds)/i);
-    const amount = amountMatch ? parseFloat(amountMatch[1]) : null;
-    let currency = currencyMatch ? currencyMatch[1].toUpperCase() : null;
-    if (currency === 'DOLLARS') currency = 'USD';
-    if (currency === 'EUROS') currency = 'EUR';
-    if (currency === 'POUNDS') currency = 'GBP';
-
-    // Billing cycle
-    const billingMatch = text.match(/(monthly|yearly|weekly|annual|annually|quarterly)/i);
-    const billing_cycle = billingMatch ? billingMatch[1].toLowerCase() : null;
-    // Status
-    const statusMatch = text.match(/(active|paused|canceled|cancelled|free trial)/i);
-    const status = statusMatch
-      ? statusMatch[1].replace('cancelled', 'canceled').replace('free trial', 'free_trial')
-      : null;
-
-    // Next payment date
-    const dateMatch = text.match(/(\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\w+ \d{1,2}, \d{4}\b)/);
-    const next_payment_date = dateMatch ? new Date(dateMatch[1]) : null;
-    // Trial end date (look for 'trial ends on ...')
-    const trialMatch = text.match(
-      /trial (?:ends|end) on (\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\w+ \d{1,2}, \d{4}\b)/i,
-    );
-    const trial_end_date = trialMatch ? new Date(trialMatch[1]) : null;
-
-    // Only return if at least service_name and amount or billing_cycle are found
-    if (!service_name && !amount && !billing_cycle) return null;
-
-    return {
-      service_name,
-      status,
-      billing_cycle,
-      amount,
-      currency,
-      next_payment_date,
-      trial_end_date,
-      method: 'general-regex',
-      confidence: 0.5 + (service_name ? 0.2 : 0) + (amount ? 0.1 : 0) + (billing_cycle ? 0.1 : 0),
-    };
   }
 }
