@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -188,15 +183,22 @@ export class TransactionService {
         return new GeneralResponseDto('Transaction already exists, skipping creation');
       }
 
-      // Find currency
-      let currencyEntity: Currency | null;
-      const curr = await this.currencyRepository.findOne({
-        where: { name: currency },
-      });
-      if (!currency) {
-        currencyEntity = this.currencyRepository.create({ code: 'USD' });
-      } else {
-        currencyEntity = curr; // Only assign if the currency exists
+      // Find currency from pre-populated list (search by both code and name)
+      const currencySearch = currency?.toUpperCase() || 'USD';
+      let currencyEntity = await this.currencyRepository
+        .createQueryBuilder('currency')
+        .where('UPPER(currency.code) = :search', { search: currencySearch })
+        .orWhere('UPPER(currency.name) LIKE :searchLike', { searchLike: `%${currencySearch}%` })
+        .getOne();
+
+      if (!currencyEntity) {
+        logger.warn(`Currency '${currencySearch}' not found. Defaulting to USD.`);
+        currencyEntity = await this.currencyRepository.findOne({
+          where: { code: 'USD' },
+        });
+        if (!currencyEntity) {
+          throw new NotFoundException(`Default currency USD not found in database. Please ensure currencies are properly seeded.`);
+        }
       }
 
       // Find bank
@@ -208,7 +210,7 @@ export class TransactionService {
         const newBank = this.bankRepository.create({ name: bankName });
         bankEntity = await this.bankRepository.save(newBank);
       } else {
-        bankEntity = bank; // Only assign if a bank exists
+        bankEntity = bank;
       }
 
       // Find Account
@@ -223,11 +225,11 @@ export class TransactionService {
           currentBalance,
           user: requestOwner,
           bank: bankEntity,
-          currency: currencyEntity!,
+          currency: currencyEntity,
         });
         accountEntity = await this.accountRepository.save(newAccount);
       } else {
-        accountEntity = account; // Only assign if account exists
+        accountEntity = account;
       }
 
       // Find category
@@ -248,7 +250,7 @@ export class TransactionService {
         user: requestOwner,
         category: categoryEntity!,
         account: accountEntity,
-        currency: currencyEntity!,
+        currency: currencyEntity,
       });
       await this.transactionRepository.save(newTransaction);
 
