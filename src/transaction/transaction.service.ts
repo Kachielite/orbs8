@@ -73,7 +73,7 @@ export class TransactionService {
           ...(search ? { description: search } : {}),
           user: { id: user.id },
         },
-        relations: ['user'],
+        relations: ['user', 'currency', 'category', 'account', 'account.bank'],
         skip,
         take,
         order,
@@ -85,7 +85,7 @@ export class TransactionService {
 
       return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
     } catch (error) {
-      logger.error(`Error fetching transactions: ${error.message}`);
+      logger.error(`Error fetching transactions: ${error}`);
       throw new InternalServerErrorException(`Error fetching transactions: ${error.message}`);
     }
   }
@@ -95,7 +95,7 @@ export class TransactionService {
       logger.info(`Fetching transaction with ID: ${id}`);
       const transaction = await this.transactionRepository.findOne({
         where: { id, user: { id: user.id } },
-        relations: ['user', 'category', 'account', 'currency', 'bank'],
+        relations: ['user', 'category', 'account', 'account.bank', 'currency'],
       });
 
       if (!transaction) {
@@ -128,11 +128,13 @@ export class TransactionService {
           ...(search ? { description: search } : {}),
           account: { id: accountId, user: { id: user.id } },
         },
-        relations: ['user', 'category', 'account', 'currency', 'bank'],
+        relations: ['user', 'category', 'account', 'account.bank', 'currency'],
         skip,
         take,
         order,
       });
+
+      console.log(transactions)
 
       const hasNext = skip + take < total;
       const hasPrevious = skip > 0;
@@ -277,7 +279,7 @@ export class TransactionService {
       logger.info(`Updating transaction with ID: ${id}`);
       const transaction = await this.transactionRepository.findOne({
         where: { id, user: { id: user.id } },
-        relations: ['user', 'category', 'account', 'currency', 'bank'],
+        relations: ['user', 'category', 'account', 'account.bank', 'currency'],
       });
 
       if (!transaction) {
@@ -401,7 +403,7 @@ export class TransactionService {
     return new TransactionDto(
       transaction.id,
       transaction.amount,
-      transaction.currency.name,
+      transaction.currency.code,
       transaction.type,
       transaction.description,
       transaction.transactionDate,
