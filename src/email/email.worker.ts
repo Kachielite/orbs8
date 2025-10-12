@@ -79,14 +79,6 @@ export class EmailWorker extends WorkerHost {
         : [];
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
 
-      // send notification to user
-      await this.notificationService.createAndEmit(
-        'Email sync started',
-        `Started syncing ${messages.length} bank notifications emails from your Gmail account.`,
-        NotificationType.SYNC_STARTED,
-        user.id,
-      );
-
       // 6. Process each email and extract subscription details
       const results: Array<Record<string, unknown>> = [];
       logger.info(
@@ -154,6 +146,13 @@ export class EmailWorker extends WorkerHost {
   async onActive(job: Job) {
     logger.info(`Job ${job.id} is active`);
     await this.handleEvents(job, 'active');
+    const userId = (job.data as JobPayloadInterface).userId;
+    await this.notificationService.createAndEmit(
+      'Email sync started',
+      `Started syncing emails from your Gmail account.`,
+      NotificationType.SYNC_STARTED,
+      userId,
+    );
   }
 
   @OnWorkerEvent('progress')
@@ -188,6 +187,13 @@ export class EmailWorker extends WorkerHost {
   async onFailed(job: Job, err: Error) {
     logger.error(`Job ${job.id} failed with error ${err.message}`);
     await this.handleEvents(job, 'failed');
+    const userId = (job.data as JobPayloadInterface).userId;
+    await this.notificationService.createAndEmit(
+      'Email sync failed',
+      'Failed to sync emails from your Gmail account.',
+      NotificationType.SYNC_FAILED,
+      userId,
+    );
   }
 
   private async handleEvents(job: Job, type: 'active' | 'progress' | 'completed' | 'failed') {

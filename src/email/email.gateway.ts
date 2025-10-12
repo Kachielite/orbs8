@@ -5,7 +5,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Server, Socket } from 'socket.io';
+import { Namespace, Socket } from 'socket.io';
 import * as jwt from 'jsonwebtoken';
 import logger from '../common/utils/logger/logger';
 import { envConstants } from '../common/constants/env.secrets';
@@ -18,7 +18,7 @@ import { Notification } from '../notification/entities/notification.entity';
 @WebSocketGateway({ cors: { origin: '*' }, namespace: '/sync' })
 export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
-  server: Server;
+  server: Namespace;
   private readonly JWT_SECRET = envConstants.JWT_ACCESS_SECRET as string;
 
   constructor(
@@ -26,7 +26,7 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly notificationRepository: Repository<Notification>,
   ) {}
 
-  handleConnection(socket: Socket) {
+  async handleConnection(socket: Socket) {
     try {
       const token =
         (socket.handshake.auth?.token as string) ||
@@ -37,13 +37,15 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const payload = jwt.verify(token, this.JWT_SECRET) as { sub: string };
-      const userId: string = payload.sub;
+      const payload = jwt.verify(token, this.JWT_SECRET) as { sub: string | number };
+      const userId: string = String(payload.sub);
 
       socket.data.userId = userId;
-      socket.join(userId); // ✅ Join user's personal room
+      await socket.join(userId); // ✅ Join user's personal room
 
-      logger.info(`User ${userId} connected via WebSocket`);
+      // Extra visibility: confirm the room membership after join
+      const roomSize = this.server.adapter?.rooms?.get(userId)?.size ?? 0;
+      logger.info(`User ${userId} connected via WebSocket (room size now: ${roomSize})`);
       void socket.emit('connected', { message: 'Connected to OrbS8 sync server' });
     } catch (error) {
       logger.error('Socket auth error:', (error as Error).message);
@@ -55,9 +57,15 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
     logger.info(`User ${socket.data.userId} disconnected`);
   }
 
+  // Public utility: emit to a specific user's room in this namespace
   sendToUser(userId: string, event: string, data: any) {
-    logger.info(`Emitting event '${event}' to user ${userId}`);
-    this.server.to(userId).emit(event, data);
+    const roomSize = this.server.adapter?.rooms?.get(userId)?.size ?? 0;
+    logger.info(
+      `Emitting event '${event}' to user ${userId} (room size: ${roomSize}) with data: ${JSON.stringify(
+        data,
+      )}`,
+    );
+    this.server.to(String(userId)).emit(event, data);
   }
 
   @SubscribeMessage('notification')

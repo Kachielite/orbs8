@@ -41,11 +41,15 @@ export class NotificationService {
         userId,
       });
 
-      if (emitOnly) {
-        this.emailGateway.sendToUser(userId.toString(), type, { title, description, progress });
-        return;
+      if (!emitOnly) {
+        await this.notificationRepository.save(newNotification);
       }
-      await this.notificationRepository.save(newNotification);
+
+      this.emailGateway.sendToUser(userId.toString(), type, {
+        title,
+        description,
+        progress,
+      });
     } catch (error) {
       logger.error(`Error creating and emitting notification: ${error.message}`);
       throw new InternalServerErrorException(
