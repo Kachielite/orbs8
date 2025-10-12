@@ -27,7 +27,7 @@ export class Transaction {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column()
+  @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
   @Column({
@@ -39,6 +39,9 @@ export class Transaction {
 
   @Column()
   description: string;
+
+  @Column()
+  transactionID: string;
 
   @Column()
   transactionDate: Date;

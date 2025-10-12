@@ -10,6 +10,8 @@ import { Bank } from '../../bank/entities/bank.entity';
 import { Category } from '../../category/entities/category.entity';
 import { Currency } from '../../currency/entities/currency.entity';
 import { Transaction } from '../../transaction/entities/transaction.entity';
+import { CategoryFeedback } from '../../category/entities/category-feedback.entity';
+import { Notification } from '../../notification/entities/notification.entity';
 
 @Module({
   imports: [
@@ -33,9 +35,11 @@ import { Transaction } from '../../transaction/entities/transaction.entity';
           Category,
           Currency,
           Transaction,
+          CategoryFeedback,
+          Notification,
         ],
         autoLoadEntities: true,
-        synchronize: true,
+        synchronize: true, // Disabled to prevent overriding manual vector schema changes
       }),
     }),
   ],

@@ -1,7 +1,8 @@
-import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { CategoryService } from './category.service';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiQuery,
@@ -10,6 +11,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { CategoryDto } from './dto/category.dto';
+import { ClassifyTransactionDto } from './dto/classify-transaction.dto';
 
 @ApiTags('Category Management')
 @Controller('category')
@@ -111,5 +113,47 @@ export class CategoryController {
   })
   async findOne(@Param('id') id: string) {
     return await this.categoryService.findOne(+id);
+  }
+
+  @Post('classify')
+  @ApiOperation({
+    summary: 'Classify a transaction',
+    description: 'Classifies a transaction based on its description.',
+  })
+  @ApiBody({
+    description: 'Transaction description to classify',
+    type: ClassifyTransactionDto,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Classification result',
+    type: CategoryDto,
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Invalid input' },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'Error classifying transaction' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async classifyTransaction(@Body() request: ClassifyTransactionDto) {
+    return await this.categoryService.classifyTransaction(request);
   }
 }
