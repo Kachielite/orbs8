@@ -33,7 +33,7 @@ export class EmailWorker extends WorkerHost {
       );
 
       // 1. Find the user entity first to get the correct type for TypeORM
-      const {user, emailEntity} = await this.findUserAndEmail(userId);
+      const { user, emailEntity } = await this.findUserAndEmail(userId);
 
       // 3. Set up the Gmail API client with OAuth2
       const oauth2Client = new google.auth.OAuth2(
@@ -57,22 +57,21 @@ export class EmailWorker extends WorkerHost {
 
       const labels = labelsRes.data.labels || [];
       const label = labels.find((l) => l.name === labelName);
-      if (!label || !label.id){
-          throw new BadRequestException(`Label '${labelName}' not found in user's Gmail`);
-
+      if (!label || !label.id) {
+        throw new BadRequestException(`Label '${labelName}' not found in user's Gmail`);
       }
       const labelId: string = label.id;
       logger.info(`Found label ID ${labelId} for label name ${labelName}`);
 
       // 5. Fetch emails with the subscription label
       let messagesRes = await gmail.users.messages.list({
-          userId: 'me',
-          labelIds: [labelId],
-          q: `newer_than:7d`,
-          maxResults: 10,
-        });
+        userId: 'me',
+        labelIds: [labelId],
+        q: `newer_than:7d`,
+        maxResults: 10,
+      })
 
-      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages : [];
+      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages.reverse() : [];
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
 
       // 6. Process each email and extract subscription details
@@ -86,12 +85,12 @@ export class EmailWorker extends WorkerHost {
       for (const m of messages) {
         if (!m.id) continue;
         // Fetch the full message details using the `get` method
-          const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
-          const msg = msgRes.data;
+        const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
+        const msg = msgRes.data;
 
-          await this.transactionService.create(user, JSON.stringify(msg));
-          const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
-          await job.updateProgress(progress);
+        await this.transactionService.create(user, JSON.stringify(msg));
+        const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
+        await job.updateProgress(progress);
       }
       logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
 
@@ -135,23 +134,23 @@ export class EmailWorker extends WorkerHost {
   }
 
   private async handleEvents(job: Job, type: 'active' | 'progress' | 'completed' | 'failed') {
-      const userId = (job.data as JobPayloadInterface).userId;
-      const userDetails = await this.findUserAndEmail(userId);
-      if (type === 'active') {
-        userDetails.emailEntity.syncStatus = EmailSyncStatus.PENDING;
-        userDetails.emailEntity.failedReason = null;
-      } else if (type === 'progress') {
-        userDetails.emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;
-        userDetails.emailEntity.failedReason = null;
-      } else if (type === 'completed') {
-        logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
-        userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
-        userDetails.emailEntity.failedReason = null;
-      } else if (type === 'failed') {
-        userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
-        userDetails.emailEntity.failedReason = job.returnvalue;
-      }
-      await this.emailRepository.save(userDetails.emailEntity);
+    const userId = (job.data as JobPayloadInterface).userId;
+    const userDetails = await this.findUserAndEmail(userId);
+    if (type === 'active') {
+      userDetails.emailEntity.syncStatus = EmailSyncStatus.PENDING;
+      userDetails.emailEntity.failedReason = null;
+    } else if (type === 'progress') {
+      userDetails.emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;
+      userDetails.emailEntity.failedReason = null;
+    } else if (type === 'completed') {
+      logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
+      userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
+      userDetails.emailEntity.failedReason = null;
+    } else if (type === 'failed') {
+      userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
+      userDetails.emailEntity.failedReason = job.returnvalue;
+    }
+    await this.emailRepository.save(userDetails.emailEntity);
   }
 
   private async findUserAndEmail(userId: number): Promise<{ user: User; emailEntity: Email }> {
@@ -160,7 +159,12 @@ export class EmailWorker extends WorkerHost {
       logger.error(`User with ID ${userId} not found`);
       throw new BadRequestException(`User with ID ${userId} not found`);
     }
-    const emailEntity = await this.emailRepository.findOne({ where: { user: user } });
+    // find email where userid is equal to user id
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: { id: user.id } as User },
+      relations: ['user'],
+    });
+
     if (!emailEntity) {
       logger.error(`Email credentials not found for user ${userId}`);
       throw new BadRequestException(`Email credentials not found for user ${userId}`);
