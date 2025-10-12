@@ -33,18 +33,9 @@ export class EmailWorker extends WorkerHost {
       );
 
       // 1. Find the user entity first to get the correct type for TypeORM
-      const user = await this.userRepository.findOne({ where: { id: Number(userId) } });
-      if (!user) throw new BadRequestException(`User with ID ${userId} not found`);
-      logger.info(`Found user details for ${user.id}`);
+      const {user, emailEntity} = await this.findUserAndEmail(userId);
 
-      // 2. Fetch user's email credentials
-      const emailEntity = await this.emailRepository.findOne({
-        where: { user: { id: user.id } },
-      });
-      if (!emailEntity) throw new BadRequestException('Email credentials not found for user');
-      logger.info(`Using email credentials for user ${user.id}`);
-
-      // 3. Setup Gmail API client with OAuth2
+      // 3. Set up the Gmail API client with OAuth2
       const oauth2Client = new google.auth.OAuth2(
         envConstants.GOOGLE_CLIENT_ID,
         envConstants.GOOGLE_CLIENT_SECRET,
@@ -166,10 +157,12 @@ export class EmailWorker extends WorkerHost {
   private async findUserAndEmail(userId: number): Promise<{ user: User; emailEntity: Email }> {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user) {
+      logger.error(`User with ID ${userId} not found`);
       throw new BadRequestException(`User with ID ${userId} not found`);
     }
     const emailEntity = await this.emailRepository.findOne({ where: { user: user } });
     if (!emailEntity) {
+      logger.error(`Email credentials not found for user ${userId}`);
       throw new BadRequestException(`Email credentials not found for user ${userId}`);
     }
     return { user, emailEntity };
