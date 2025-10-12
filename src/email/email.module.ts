@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { EmailService } from './email.service';
 import { EmailController } from './email.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -15,6 +15,9 @@ import { Account } from '../account/entities/account.entity';
 import { Currency } from '../currency/entities/currency.entity';
 import { OpenAIConfig } from '../common/configurations/openai.config';
 import { CategoryService } from '../category/category.service';
+import { EmailGateway } from './email.gateway';
+import { Notification } from '../notification/entities/notification.entity';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -27,11 +30,20 @@ import { CategoryService } from '../category/category.service';
       Bank,
       Account,
       Currency,
+      Notification,
     ]),
     BullModule.registerQueue({ name: 'email-sync' }),
+    forwardRef(() => NotificationModule),
   ],
   controllers: [EmailController],
-  providers: [EmailService, EmailWorker, TransactionService, OpenAIConfig, CategoryService],
-  exports: [EmailService],
+  providers: [
+    EmailService,
+    EmailWorker,
+    TransactionService,
+    OpenAIConfig,
+    CategoryService,
+    EmailGateway,
+  ],
+  exports: [EmailService, EmailGateway],
 })
 export class EmailModule {}

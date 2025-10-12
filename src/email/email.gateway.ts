@@ -1,1 +1,80 @@
-export class EmailGateway {}
+import {
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
+import * as jwt from 'jsonwebtoken';
+import logger from '../common/utils/logger/logger';
+import { envConstants } from '../common/constants/env.secrets';
+import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Notification } from '../notification/entities/notification.entity';
+
+@Injectable()
+@WebSocketGateway({ cors: { origin: '*' }, namespace: '/sync' })
+export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  @WebSocketServer()
+  server: Server;
+  private readonly JWT_SECRET = envConstants.JWT_ACCESS_SECRET as string;
+
+  constructor(
+    @InjectRepository(Notification)
+    private readonly notificationRepository: Repository<Notification>,
+  ) {}
+
+  handleConnection(socket: Socket) {
+    try {
+      const token = socket.handshake.auth?.token as string;
+
+      if (!token) {
+        socket.disconnect(true);
+        return;
+      }
+
+      const payload = jwt.verify(token, this.JWT_SECRET) as { sub: string };
+      const userId: string = payload.sub;
+
+      socket.data.userId = userId;
+      socket.join(userId); // ✅ Join user's personal room
+
+      logger.info(`User ${userId} connected via WebSocket`);
+      void socket.emit('connected', { message: 'Connected to OrbS8 sync server' });
+    } catch (error) {
+      logger.error('Socket auth error:', (error as Error).message);
+      socket.disconnect(true);
+    }
+  }
+
+  handleDisconnect(socket: Socket) {
+    logger.info(`User ${socket.data.userId} disconnected`);
+  }
+
+  sendToUser(userId: string, event: string, data: any) {
+    this.server.to(userId).emit(event, data);
+  }
+
+  @SubscribeMessage('notification:read')
+  async handleInit(socket: Socket) {
+    const userId = socket.data.userId as string;
+    const notifications = await this.notificationRepository.find({
+      where: { userId: parseInt(userId, 10) },
+      order: { createdAt: 'DESC' },
+      take: 20,
+    });
+    // send latest notifications to user
+    this.sendToUser(userId, 'notification:read', {
+      data: notifications,
+      count: notifications.length,
+    });
+  }
+
+  // Optional: for manual testing
+  @SubscribeMessage('ping')
+  handlePing(socket: Socket) {
+    socket.emit('pong', { time: new Date() });
+  }
+}

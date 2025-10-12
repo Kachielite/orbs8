@@ -1,19 +1,48 @@
-import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Notification } from './entities/notification.entity';
+import { Notification, NotificationType } from './entities/notification.entity';
 import { User } from '../auth/entities/user.entity';
 import logger from '../common/utils/logger/logger';
 import { NotificationDto } from './dto/notification.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { NotificationsResponseDto } from './dto/notifications-response.dto';
+import { EmailGateway } from '../email/email.gateway';
 
 @Injectable()
 export class NotificationService {
   constructor(
     @InjectRepository(Notification)
     private readonly notificationRepository: Repository<Notification>,
+    @Inject(forwardRef(() => EmailGateway))
+    private readonly emailGateway: EmailGateway,
   ) {}
+
+  async createAndEmit(
+    title: string,
+    description: string,
+    type: NotificationType,
+    userId: number,
+    progress?: number,
+  ) {
+    try {
+      logger.info(`Creating and emitting notification for user: ${userId}`);
+      const newNotification = this.notificationRepository.create({
+        title,
+        description,
+        type,
+        userId,
+      });
+      await this.notificationRepository.save(newNotification);
+
+      this.emailGateway.sendToUser(userId.toString(), type, { title, description, progress });
+    } catch (error) {
+      logger.error(`Error creating and emitting notification: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Error creating and emitting notification: ${error.message}`,
+      );
+    }
+  }
 
   async findAll(user: Partial<User>): Promise<NotificationsResponseDto> {
     try {

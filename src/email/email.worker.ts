@@ -10,6 +10,8 @@ import logger from '../common/utils/logger/logger';
 import { BadRequestException } from '@nestjs/common';
 import { JobPayloadInterface } from './interface/job-payload.interface';
 import { TransactionService } from '../transaction/transaction.service';
+import { NotificationService } from '../notification/notification.service';
+import { NotificationType } from '../notification/entities/notification.entity';
 
 @Processor('email-sync')
 export class EmailWorker extends WorkerHost {
@@ -19,6 +21,7 @@ export class EmailWorker extends WorkerHost {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly transactionService: TransactionService,
+    private readonly notificationService: NotificationService,
   ) {
     super();
   }
@@ -75,6 +78,14 @@ export class EmailWorker extends WorkerHost {
         ? messagesRes.data.messages.reverse()
         : [];
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
+
+      // send notification to user
+      await this.notificationService.createAndEmit(
+        'Email sync started',
+        `Started syncing ${messages.length} bank notifications emails from your Gmail account.`,
+        NotificationType.SYNC_STARTED,
+        user.id,
+      );
 
       // 6. Process each email and extract subscription details
       const results: Array<Record<string, unknown>> = [];
@@ -149,12 +160,27 @@ export class EmailWorker extends WorkerHost {
   async onProgress(job: Job, progress: number) {
     logger.info(`Job ${job.id} progress: ${progress}% complete`);
     await this.handleEvents(job, 'progress');
+    const userId = (job.data as JobPayloadInterface).userId;
+    await this.notificationService.createAndEmit(
+      'Email sync in progress',
+      `Progress: ${progress}% complete.`,
+      NotificationType.SYNC_PROGRESS,
+      userId,
+      progress,
+    );
   }
 
   @OnWorkerEvent('completed')
   async onCompleted(job: Job) {
     logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
     await this.handleEvents(job, 'completed');
+    const userId = (job.data as JobPayloadInterface).userId;
+    await this.notificationService.createAndEmit(
+      'Email sync completed',
+      `Completed syncing emails from your Gmail account.`,
+      NotificationType.SYNC_COMPLETED,
+      userId,
+    );
   }
 
   @OnWorkerEvent('failed')
@@ -178,7 +204,7 @@ export class EmailWorker extends WorkerHost {
       userDetails.emailEntity.failedReason = null;
     } else if (type === 'failed') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
-      userDetails.emailEntity.failedReason = job.returnvalue;
+      userDetails.emailEntity.failedReason = job.returnvalue as string;
     }
     await this.emailRepository.save(userDetails.emailEntity);
   }

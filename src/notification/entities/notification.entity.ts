@@ -1,4 +1,10 @@
-import { Column, CreateDateColumn, PrimaryGeneratedColumn, UpdateDateColumn } from 'typeorm';
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 export enum NotificationType {
   SYNC_STARTED = 'sync_started',
@@ -6,6 +12,7 @@ export enum NotificationType {
   SYNC_COMPLETED = 'sync_completed',
 }
 
+@Entity({ name: 'notifications' })
 export class Notification {
   @PrimaryGeneratedColumn()
   id: number;
