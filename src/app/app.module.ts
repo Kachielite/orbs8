@@ -14,6 +14,7 @@ import { TransactionModule } from '../transaction/transaction.module';
 import { EmbeddingModule } from '../common/configurations/embedding.config';
 import { LangSmithModule } from '../langsmith/langsmith.module';
 import { OpenAIModule } from '../common/configurations/openai.config';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { OpenAIModule } from '../common/configurations/openai.config';
     TransactionModule,
     EmbeddingModule,
     OpenAIModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [AppService],
