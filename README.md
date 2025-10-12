@@ -92,6 +92,12 @@ Email (Gmail connector)
 - POST /email/get-token — exchanges OAuth code for tokens (tokens stored encrypted)
 - GET  /email/sync-status — current sync status for user (number scanned, last sync time)
 - POST /email/manual-sync — manually trigger a sync job
+- GET  /email/verify-label-access?label-name={LabelName} — verifies Gmail access and that the specified label exists; stores the label to be used for subsequent syncs
+
+Notification
+- GET  /notification — get all notifications for authenticated user
+- GET  /notification/:id — get specific notification by ID
+- PUT  /notification/:id — mark notification as read
 
 Account
 - GET  /account — get all accounts for authenticated user
@@ -111,6 +117,73 @@ Bank Notifications
 - REST endpoints for managing/viewing extracted bank notifications (see src/subscriptions)
 
 Swagger/OpenAPI is configured via decorators in controllers.
+
+
+## Realtime sync updates (WebSocket + BullMQ/Redis)
+
+Overview
+- WebSocket: Socket.IO namespace /sync exposes realtime events to the authenticated user.
+- Auth: Pass the JWT access token either via the Socket.IO auth payload (auth.token) or Authorization header (Bearer <token>).
+- Rooming: On connect, the server validates the token, extracts the user id (JWT sub), and joins the socket to a private room named by that user id.
+- Events: The server emits user-scoped events into that room; only sockets for that user receive them.
+
+Events you can listen for
+- connected — sent once on successful connection
+- notification — initial payload of recent notifications
+- sync_started — background email sync began
+- sync_progress — progress updates with { progress: number }
+- sync_completed — background email sync finished
+- sync_failed — background email sync failed
+
+Client example (socket.io-client)
+```ts
+import { io } from 'socket.io-client';
+
+const socket = io('http://localhost:3000/sync', {
+  auth: { token: '<ACCESS_TOKEN>' },
+  // or headers: { Authorization: `Bearer <ACCESS_TOKEN>` },
+});
+
+socket.on('connected', (payload) => console.log('WS connected:', payload));
+
+socket.on('notification', (payload) => {
+  console.log('Notifications:', payload.data, 'count:', payload.count);
+});
+
+socket.on('sync_started', (p) => console.log('Sync started:', p));
+socket.on('sync_progress', (p) => console.log('Sync progress:', p.progress));
+socket.on('sync_completed', (p) => console.log('Sync completed:', p));
+socket.on('sync_failed', (p) => console.warn('Sync failed:', p));
+
+socket.emit('notification'); // request initial notifications
+```
+
+How background jobs and Redis tie in
+- Queue setup: The service registers a BullMQ queue named email-sync (see src/email/email.module.ts).
+- Trigger: POST /email/manual-sync enqueues a job (name: sync-emails) with the current user's id and selected Gmail label.
+- Worker: EmailWorker (src/email/email.worker.ts) processes jobs. On BullMQ worker lifecycle events (active, progress, completed, failed) it updates the database and calls NotificationService.createAndEmit(...).
+- Emission: NotificationService emits via the EmailGateway into the user's private room; the gateway is attached to the /sync namespace.
+- Redis: BullMQ uses Redis for job queues. Default connection is localhost:6379 (see src/common/configurations/bullmq.config.ts). Ensure Redis is running locally.
+
+Worker lifecycle and Redis integration
+1. Job enqueued: When POST /email/manual-sync is called, EmailService adds a job to the BullMQ 'email-sync' queue stored in Redis.
+2. Worker picks up job: EmailWorker (@Processor('email-sync')) polls Redis and receives the job payload containing userId and labelName.
+3. Job processing: The worker fetches emails from Gmail API, extracts transaction data, and saves to the database.
+4. Progress updates: As the worker processes each email, it calls job.updateProgress(percent), triggering the @OnWorkerEvent('progress') handler.
+5. Real-time notifications: Each worker event (active, progress, completed, failed) creates a notification record in the database and emits a WebSocket event via EmailGateway.sendToUser() to the user's private room.
+6. Database sync: The worker updates the Email entity's syncStatus field (PENDING → IN_PROGRESS → COMPLETED/FAILED) at each lifecycle stage.
+7. Job completion: Upon successful processing, the job result is stored in Redis, and a 'sync_completed' event is emitted to the user's WebSocket connection.
+
+Redis configuration
+- Connection: BullMQ connects to Redis using the configuration in src/common/configurations/bullmq.config.ts.
+- Default: localhost:6379 (no password)
+- Customization: Update the config file or use environment variables (REDIS_HOST, REDIS_PORT, REDIS_PASSWORD) to connect to a remote Redis instance.
+- Queue persistence: Jobs are persisted in Redis, allowing for retries and recovery after server restarts.
+
+Notes
+- By default, Redis host/port are configured in code. To use a different Redis instance, update src/common/configurations/bullmq.config.ts accordingly.
+- User room keys are the user's numeric id as a string. Clients connect with the same JWT used for the HTTP API so the gateway can place them into the correct room.
+- Ensure Redis is running before starting the application: `redis-server` or use Docker: `docker run -d -p 6379:6379 redis:alpine`
 
 
 ## Project structure
