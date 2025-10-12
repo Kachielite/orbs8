@@ -134,8 +134,6 @@ export class TransactionService {
         order,
       });
 
-      console.log(transactions)
-
       const hasNext = skip + take < total;
       const hasPrevious = skip > 0;
       const transactionsDto = transactions.map((transaction) => this.convertToDto(transaction));
@@ -167,6 +165,8 @@ export class TransactionService {
         accountName,
         bankName,
       } = transactionDetails;
+
+      console.log("transactionDetails: ", transactionDetails)
 
       // Find user
       const requestOwner = await this.userRepository.findOne({ where: { id: user.id } });

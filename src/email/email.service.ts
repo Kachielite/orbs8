@@ -146,6 +146,9 @@ export class EmailService {
         throw new BadRequestException('Email label not set. Please verify label access first.');
       }
 
+      // refresh email token
+      await this.refreshGmailAccessToken(user.id, emailEntity[0]);
+
       // Add job to the queue
       await this.emailSyncQueue.add('sync-emails', {
         userId: user.id,
@@ -266,24 +269,7 @@ export class EmailService {
     logger.info('Scheduled sync completed');
   }
 
-  private async updateSyncStatus(
-    user: User,
-    status: EmailSyncStatus,
-    failedReason?: string,
-  ): Promise<void> {
-    const emailEntity = await this.emailRepository.findOne({
-      where: { user: { id: user.id } as User },
-      relations: ['user'],
-    });
-    if (emailEntity) {
-      emailEntity.syncStatus = status;
-      emailEntity.failedReason = failedReason ?? null;
-      await this.emailRepository.save(emailEntity);
-    }
-    return;
-  }
-
-  private async refreshGmailAccessToken(userId: number, emailEntity: Email) {
+  public async refreshGmailAccessToken(userId: number, emailEntity: Email) {
     try {
       this.oauth2Client.setCredentials({
         refresh_token: emailEntity.refreshToken,
@@ -325,5 +311,22 @@ export class EmailService {
 
       throw new BadRequestException('Failed to refresh Gmail token.');
     }
+  }
+
+  private async updateSyncStatus(
+    user: User,
+    status: EmailSyncStatus,
+    failedReason?: string,
+  ): Promise<void> {
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: { id: user.id } as User },
+      relations: ['user'],
+    });
+    if (emailEntity) {
+      emailEntity.syncStatus = status;
+      emailEntity.failedReason = failedReason ?? null;
+      await this.emailRepository.save(emailEntity);
+    }
+    return;
   }
 }
