@@ -3,7 +3,7 @@ const axios = require('axios');
 async function testClassification() {
   try {
     const response = await axios.post('http://localhost:3000/category/classify', {
-      desc: '000000038313 HEAD OFFICE BRANCH -IBTC PLACE WEB PURCHASE @Netflixcom LAGOS NG'
+      description: '000000038313 HEAD OFFICE BRANCH -IBTC PLACE WEB PURCHASE @Netflixcom LAGOS NG'
     }, {
       headers: {
         'Content-Type': 'application/json',

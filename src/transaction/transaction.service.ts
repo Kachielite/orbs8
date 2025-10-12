@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -153,7 +158,6 @@ export class TransactionService {
   async create(user: Partial<User>, emailText: string): Promise<GeneralResponseDto> {
     try {
       logger.info(`Creating transaction for user: ${user.id}`);
-
       // Extract transaction details from the email
       const transactionDetails = await this.extractTransactionDetails(emailText);
       const {
@@ -168,8 +172,6 @@ export class TransactionService {
         accountName,
         bankName,
       } = transactionDetails;
-
-      console.log("transactionDetails: ", transactionDetails)
 
       // Find user
       const requestOwner = await this.userRepository.findOne({ where: { id: user.id } });
@@ -202,7 +204,9 @@ export class TransactionService {
           where: { code: 'USD' },
         });
         if (!currencyEntity) {
-          throw new NotFoundException(`Default currency USD not found in database. Please ensure currencies are properly seeded.`);
+          throw new NotFoundException(
+            `Default currency USD not found in database. Please ensure currencies are properly seeded.`,
+          );
         }
       }
 
@@ -348,7 +352,6 @@ export class TransactionService {
       search: query.search,
       sort: query.sort as keyof Transaction,
       order: query.order,
-
     };
 
     return paginationUtil<Transaction>({

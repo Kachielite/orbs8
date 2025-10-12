@@ -1,10 +1,5 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment,@typescript-eslint/no-unsafe-return */
-import {
-  BadRequestException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, DataSourceOptions, ILike, Repository } from 'typeorm';
 import { Category } from './entities/category.entity';
@@ -85,6 +80,17 @@ export class CategoryService {
     try {
       logger.info(`Classifying transaction: ${JSON.stringify(request)}`);
       const { description } = request;
+
+      // 1) Deterministic regex-based classification first
+      const allCategories = await this.categoryRepository.find();
+      const regexMatch = this.matchCategoryByRegex(description, allCategories);
+      if (regexMatch) {
+        logger.info(`✅ Regex matched category: ${regexMatch.name}`);
+        console.log(`Desc: ${description} | Category: ${regexMatch.name}`);
+        return this.convertToDto(regexMatch);
+      }
+
+      // 2) Fallback to LLM + retrieval flow
       const docs = await this.loadDCategories();
       const retriever = await this.getRetriever(docs);
       const llm = this.openAI.getLLM();
@@ -122,11 +128,15 @@ export class CategoryService {
         where: { name: ILike(`${categoryName}`) }, // case-insensitive match
       });
 
-      if (!category) {
-        throw new BadRequestException(`Category ${prospectCategory.answer.name} not found`);
+      if (category) {
+        console.log(`Desc: ${description} | Category: ${category.name}`);
+        return this.convertToDto(category);
       }
 
-      return this.convertToDto(category);
+      // If the LLM returns a name that's not in the DB, surface an error rather than forcing a fallback
+      throw new BadRequestException(
+        `Category '${categoryName}' from classifier not found in database`,
+      );
     } catch (error) {
       logger.error(`Error classifying transaction: ${(error as Error).message}`);
       if (error instanceof BadRequestException) {
@@ -252,6 +262,131 @@ export class CategoryService {
     return vectorStore.asRetriever();
   }
 
+  // Deterministic regex matcher: returns the longest-pattern match if multiple
+  private matchCategoryByRegex(description: string, categories: Category[]): Category | null {
+    if (!description) return null;
+    const text = description.toString();
+
+    const upperText = text.toUpperCase();
+    const p2pStrong =
+      /(IFO|TRANSFER|P2P|SEND|TRF\/\/FRM|BENEFICIARY|REVERSAL|REVSL|MOBILE\s?MONEY|PERSONAL\s?TRANSFER|PAYMENT\s?TO)/i.test(
+        text,
+      );
+
+    // Extract potential brand tokens from the text (A-Z/0-9 words length >= 3)
+    const textTokens = Array.from(new Set(upperText.match(/\b[A-Z0-9][A-Z0-9_-]{2,}\b/g) || []));
+    const genericStops = new Set([
+      'WEB',
+      'PAYMENT',
+      'PAYMT',
+      'PYMT',
+      'POS',
+      'ONLINE',
+      'STORE',
+      'SHOP',
+      'MERCHANT',
+      'TO',
+      'FROM',
+      'ATM',
+      'FEE',
+      'CHARGE',
+      'REV',
+      'REVSL',
+      'REVERSAL',
+      'TRANSFER',
+      'BENEFICIARY',
+      'MONEY',
+      'MOBILE',
+      'PERSONAL',
+      'PAYMENTTO',
+      'PAYMENTFROM',
+      'BRANCH',
+      'KE',
+      'NG',
+      'GH',
+      'TZ',
+      'NAIROBI',
+      'LAGOS',
+    ]);
+
+    type ScoredMatch = { cat: Category; score: number };
+    const scoredMatches: ScoredMatch[] = [];
+
+    for (const cat of categories) {
+      const rawPattern = cat.regex?.trim();
+      if (!rawPattern) continue;
+      const pattern = rawPattern.includes('\\') ? rawPattern.replace(/\\\\/g, '\\') : rawPattern;
+      try {
+        const re = new RegExp(pattern, 'i');
+        const m = re.exec(text);
+        if (!m) continue;
+
+        const matched = m[0] ?? '';
+
+        // Tokenize pattern into candidate brand tokens (uppercase words >=3)
+        const patternTokens = Array.from(
+          new Set((pattern.toUpperCase().match(/[A-Z0-9]{3,}/g) || []).map((t) => t)),
+        ).filter((t) => !genericStops.has(t));
+
+        // Overlap between text tokens and pattern tokens, excluding generics
+        const overlap = new Set(
+          textTokens
+            .map((t) => t.replace(/[^A-Z0-9]/g, ''))
+            .filter((t) => t.length >= 3 && !genericStops.has(t) && patternTokens.includes(t)),
+        );
+
+        // Scoring components
+        // 1) Overlap weight (dominant)
+        let score = overlap.size * 12;
+
+        // 2) Special boost for standout brands
+        if (overlap.has('GLOVO')) score += 8;
+        if (overlap.has('UBEREATS') || overlap.has('UBEREAT')) score += 6;
+
+        // 3) Small weight for matched substring length
+        score += Math.min(20, matched.length) / 4; // 0..5
+
+        // Penalize P2P catch-all when no strong P2P keywords present
+        const isP2P = cat.name.toLowerCase() === 'peer-to-peer transfer';
+        if (isP2P && !p2pStrong) {
+          score -= 1000; // effectively ignore unless it's the only match
+        }
+
+        scoredMatches.push({ cat, score });
+      } catch (err) {
+        logger.warn(
+          `Invalid regex for category '${cat.name}': ${rawPattern}. Error: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (!scoredMatches.length) return null;
+
+    // Prefer highest score; if tie/near-tie, defer to LLM to disambiguate
+    scoredMatches.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      const aPat = (a.cat.regex || '').length;
+      const bPat = (b.cat.regex || '').length;
+      if (bPat !== aPat) return bPat - aPat;
+      return a.cat.name.localeCompare(b.cat.name);
+    });
+
+    const top = scoredMatches[0];
+    const runnerUp = scoredMatches[1];
+    if (
+      runnerUp &&
+      // near-tie threshold
+      Math.abs(top.score - runnerUp.score) <= 3 &&
+      top.cat.name.toLowerCase() !== 'peer-to-peer transfer' &&
+      runnerUp.cat.name.toLowerCase() !== 'peer-to-peer transfer'
+    ) {
+      // let LLM decide between very similar matches (e.g., Groceries vs Dining)
+      return null;
+    }
+
+    return top.cat;
+  }
+
   private convertToDto(category: Category): CategoryDto {
     return new CategoryDto(category.id, category.name, category.description, category.icon);
   }
@@ -282,9 +417,8 @@ export class CategoryService {
       1. First, attempt to match the payment description using the "regex" field of each category (case-insensitive).
       2. If multiple regex patterns match, choose the one with the **longest** pattern (most specific).
       3. If no regex match is found:
-         - Check if the payment description contains **human names** — multiple capitalized words like "JOHN DOE" or "EMILY CARTER".
-         - If it looks like a personal name or includes sender/receiver details, classify it as **"Peer-to-Peer Transfer"** if that category exists.
-      4. If no suitable category is found, return the one named **"Uncategorized"**.
+         - Choose the single best match from the provided categories using the retrieved context.
+         - If unsure, return the one whose name is "Uncategorized".
       
       ### OUTPUT FORMAT:
       - Return ONLY a single JSON object (not an array).

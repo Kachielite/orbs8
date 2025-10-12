@@ -53,7 +53,7 @@ export class EmailWorker extends WorkerHost {
 
       // 4. Get label ID for the subscription label
       logger.info(`Getting label ID for subscription label: ${labelName}`);
-      let labelsRes = await gmail.users.labels.list({ userId: 'me' });
+      const labelsRes = await gmail.users.labels.list({ userId: 'me' });
 
       const labels = labelsRes.data.labels || [];
       const label = labels.find((l) => l.name === labelName);
@@ -64,14 +64,16 @@ export class EmailWorker extends WorkerHost {
       logger.info(`Found label ID ${labelId} for label name ${labelName}`);
 
       // 5. Fetch emails with the subscription label
-      let messagesRes = await gmail.users.messages.list({
+      const messagesRes = await gmail.users.messages.list({
         userId: 'me',
         labelIds: [labelId],
         q: `newer_than:7d`,
-        maxResults: 10,
-      })
+        maxResults: 20,
+      });
 
-      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages.reverse() : [];
+      const messages = Array.isArray(messagesRes.data.messages)
+        ? messagesRes.data.messages.reverse()
+        : [];
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
 
       // 6. Process each email and extract subscription details
@@ -90,24 +92,28 @@ export class EmailWorker extends WorkerHost {
 
         // Extract only subject and body to save tokens
         const headers = msg.payload?.headers || [];
-        const subject = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+        const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
 
         // Extract body from the message payload
-        let body = '';
+        let bodyRaw = '';
         if (msg.payload?.body?.data) {
           // Decode base64url encoded body
-          body = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8');
+          bodyRaw = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8');
         } else if (msg.payload?.parts) {
           // If message has parts, look for text/plain or text/html
           for (const part of msg.payload.parts) {
             if (part.mimeType === 'text/plain' && part.body?.data) {
-              body = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
               break;
-            } else if (part.mimeType === 'text/html' && part.body?.data && !body) {
-              body = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+            } else if (part.mimeType === 'text/html' && part.body?.data && !bodyRaw) {
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
             }
           }
         }
+
+        // Normalize whitespace: trim and replace multiple spaces/newlines with single space
+        const subject = subjectRaw.trim().replace(/\s+/g, ' ');
+        const body = bodyRaw.trim().replace(/\s+/g, ' ');
 
         // Create a minimal email text with just subject and body
         const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
