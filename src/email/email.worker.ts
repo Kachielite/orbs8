@@ -88,7 +88,31 @@ export class EmailWorker extends WorkerHost {
         const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
         const msg = msgRes.data;
 
-        await this.transactionService.create(user, JSON.stringify(msg));
+        // Extract only subject and body to save tokens
+        const headers = msg.payload?.headers || [];
+        const subject = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+
+        // Extract body from the message payload
+        let body = '';
+        if (msg.payload?.body?.data) {
+          // Decode base64url encoded body
+          body = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8');
+        } else if (msg.payload?.parts) {
+          // If message has parts, look for text/plain or text/html
+          for (const part of msg.payload.parts) {
+            if (part.mimeType === 'text/plain' && part.body?.data) {
+              body = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+              break;
+            } else if (part.mimeType === 'text/html' && part.body?.data && !body) {
+              body = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+            }
+          }
+        }
+
+        // Create a minimal email text with just subject and body
+        const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
+
+        await this.transactionService.create(user, emailText);
         const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
