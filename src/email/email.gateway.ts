@@ -28,7 +28,9 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   handleConnection(socket: Socket) {
     try {
-      const token = socket.handshake.auth?.token as string;
+      const token =
+        (socket.handshake.auth?.token as string) ||
+        socket.handshake.headers?.authorization?.split(' ')[1];
 
       if (!token) {
         socket.disconnect(true);
@@ -54,10 +56,11 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   sendToUser(userId: string, event: string, data: any) {
+    logger.info(`Emitting event '${event}' to user ${userId}`);
     this.server.to(userId).emit(event, data);
   }
 
-  @SubscribeMessage('notification:read')
+  @SubscribeMessage('notification')
   async handleInit(socket: Socket) {
     const userId = socket.data.userId as string;
     const notifications = await this.notificationRepository.find({
@@ -66,7 +69,7 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
       take: 20,
     });
     // send latest notifications to user
-    this.sendToUser(userId, 'notification:read', {
+    this.sendToUser(userId, 'notification', {
       data: notifications,
       count: notifications.length,
     });
@@ -75,6 +78,14 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // Optional: for manual testing
   @SubscribeMessage('ping')
   handlePing(socket: Socket) {
-    socket.emit('pong', { time: new Date() });
+    logger.info(`Received ping from user ${socket.data.userId}, emitting pong`);
+    socket.emit('ping', { time: new Date() });
+  }
+
+  @SubscribeMessage('test-sync')
+  handleTestSync(socket: Socket) {
+    const userId = socket.data.userId as string;
+    logger.info(`Test sync triggered for user ${userId}`);
+    this.sendToUser(userId, 'sync_started', { message: 'Test sync started' });
   }
 }

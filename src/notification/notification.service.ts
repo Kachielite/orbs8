@@ -1,4 +1,10 @@
-import { Injectable, InternalServerErrorException, NotFoundException, Inject, forwardRef } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
@@ -23,6 +29,7 @@ export class NotificationService {
     description: string,
     type: NotificationType,
     userId: number,
+    emitOnly: boolean = false,
     progress?: number,
   ) {
     try {
@@ -33,9 +40,12 @@ export class NotificationService {
         type,
         userId,
       });
-      await this.notificationRepository.save(newNotification);
 
-      this.emailGateway.sendToUser(userId.toString(), type, { title, description, progress });
+      if (emitOnly) {
+        this.emailGateway.sendToUser(userId.toString(), type, { title, description, progress });
+        return;
+      }
+      await this.notificationRepository.save(newNotification);
     } catch (error) {
       logger.error(`Error creating and emitting notification: ${error.message}`);
       throw new InternalServerErrorException(

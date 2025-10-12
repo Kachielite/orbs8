@@ -71,7 +71,7 @@ export class EmailWorker extends WorkerHost {
         userId: 'me',
         labelIds: [labelId],
         q: `newer_than:7d`,
-        maxResults: 20,
+        maxResults: 10,
       });
 
       const messages = Array.isArray(messagesRes.data.messages)
@@ -166,6 +166,7 @@ export class EmailWorker extends WorkerHost {
       `Progress: ${progress}% complete.`,
       NotificationType.SYNC_PROGRESS,
       userId,
+      true,
       progress,
     );
   }
