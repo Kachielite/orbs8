@@ -4,15 +4,7 @@ import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { type GetTransactionQuery } from './interface/transaction-query.interface';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
-import {
-  ApiBearerAuth,
-  ApiBody,
-  ApiOperation,
-  ApiParam,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
@@ -165,7 +157,7 @@ export class TransactionController {
   @ApiResponse({ status: 500, description: 'Internal server error' })
   async findAllByAccount(
     @Query() query: GetTransactionQuery,
-    @Param() accountId: string,
+    @Param('accountId') accountId: string,
     @CurrentUser() user: Partial<User>,
   ) {
     return await this.transactionService.findAllByAccount(+accountId, query, user);

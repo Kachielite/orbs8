@@ -2,7 +2,7 @@ import { ConflictException, Injectable, InternalServerErrorException, NotFoundEx
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ILike, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
@@ -70,7 +70,7 @@ export class TransactionService {
       logger.info(`Fetching transactions for user: ${user.id}`);
       const [transactions, total] = await this.transactionRepository.findAndCount({
         where: {
-          ...(search ? { description: search } : {}),
+          ...(search ? { description: ILike(`%${search}%`) } : {}),
           user: { id: user.id },
         },
         relations: ['user', 'currency', 'category', 'account', 'account.bank'],
@@ -119,14 +119,16 @@ export class TransactionService {
     query: GetTransactionQuery,
     user: Partial<User>,
   ): Promise<PaginatedResponseDto<TransactionDto>> {
-    const { page, limit, skip, take, order, search } = this.createPaginationParams(query);
-
+    logger.info(`Fetching transactions for account: ${accountId}`);
     try {
-      logger.info(`Fetching transactions for account: ${accountId}`);
+      const paginationParams = this.createPaginationParams(query);
+      const { page, limit, skip, take, order, search } = paginationParams;
+
       const [transactions, total] = await this.transactionRepository.findAndCount({
         where: {
-          ...(search ? { description: search } : {}),
-          account: { id: accountId, user: { id: user.id } },
+          ...(search ? { description: ILike(`%${search}%`) } : {}),
+          account: { id: accountId },
+          user: { id: user.id },
         },
         relations: ['user', 'category', 'account', 'account.bank', 'currency'],
         skip,
@@ -140,6 +142,7 @@ export class TransactionService {
 
       return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
     } catch (error) {
+      logger.error(`Error stack: ${error}`);
       logger.error(`Error fetching transactions for account ${accountId}: ${error.message}`);
       throw new InternalServerErrorException(
         `Error fetching transactions for account ${accountId}: ${error.message}`,
@@ -345,6 +348,7 @@ export class TransactionService {
       search: query.search,
       sort: query.sort as keyof Transaction,
       order: query.order,
+
     };
 
     return paginationUtil<Transaction>({
