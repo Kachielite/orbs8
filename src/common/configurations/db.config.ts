@@ -3,7 +3,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../../auth/entities/user.entity';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { Email } from '../../email/entities/email.entity';
-import { Subscription } from '../../subscriptions/entities/subscription.entity';
 import { Token } from '../../tokens/entities/token.entity';
 import { Account } from '../../account/entities/account.entity';
 import { Bank } from '../../bank/entities/bank.entity';
@@ -28,7 +27,6 @@ import { Notification } from '../../notification/entities/notification.entity';
         entities: [
           User,
           Email,
-          Subscription,
           Token,
           Account,
           Bank,
