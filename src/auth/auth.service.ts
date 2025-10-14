@@ -49,6 +49,7 @@ export class AuthService {
       const newUser = this.userRepository.create({
         ...request,
         password: hashedPassword,
+        preferredCurrency: request.currencyId,
       });
 
       await this.userRepository.save(newUser);
