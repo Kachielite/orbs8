@@ -69,21 +69,32 @@ export class AccountService {
         relations: ['user', 'currency', 'bank'],
       });
 
+      // Get unique currencies for quotes
+      const uniqueCurrencies = [
+        ...new Set(accounts.map((a) => a.currency.code).filter((c) => c !== preferredCurrency)),
+      ];
+      const quotes: Record<string, number> = {};
+      for (const code of uniqueCurrencies) {
+        const conversion = await currencyConverter(code, preferredCurrency, 1);
+        quotes[`${preferredCurrency}${code}`] = conversion.rate;
+      }
+
       // Convert currencies to preferred currency
-      const accountWithConvertedCurrency = accounts.map(async (account) => {
+      const accountWithConvertedCurrency = await Promise.all(accounts.map(async (account) => {
         if (account.currency.code === preferredCurrency) {
           return parseFloat(account.currentBalance.toString());
         }
 
-        return currencyConverter(
+        const conversion = await currencyConverter(
           account.currency.code,
           preferredCurrency,
           parseFloat(account.currentBalance.toString()),
         );
-      });
+        return conversion.result;
+      }));
 
       // Sum up all converted currencies
-      const totalBalance = (await Promise.all(accountWithConvertedCurrency)).reduce(
+      const totalBalance = accountWithConvertedCurrency.reduce(
         (acc, balance) => acc + balance,
         0,
       );
@@ -122,7 +133,7 @@ export class AccountService {
           : 0;
       const numberOfAccounts = accounts.length;
 
-      return new AccountSummaryDto(formattedTotalBalance, spendChange, numberOfAccounts);
+      return new AccountSummaryDto(formattedTotalBalance, spendChange, numberOfAccounts, quotes);
     } catch (error) {
       logger.error(`Error fetching account summary for user: ${user.id}: ${error}`);
       throw new InternalServerErrorException(`Error fetching account summary: ${error.message}`);
