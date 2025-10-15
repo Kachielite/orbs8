@@ -80,24 +80,23 @@ export class AccountService {
       }
 
       // Convert currencies to preferred currency
-      const accountWithConvertedCurrency = await Promise.all(accounts.map(async (account) => {
-        if (account.currency.code === preferredCurrency) {
-          return parseFloat(account.currentBalance.toString());
-        }
+      const accountWithConvertedCurrency = await Promise.all(
+        accounts.map(async (account) => {
+          if (account.currency.code === preferredCurrency) {
+            return parseFloat(account.currentBalance.toString());
+          }
 
-        const conversion = await currencyConverter(
-          account.currency.code,
-          preferredCurrency,
-          parseFloat(account.currentBalance.toString()),
-        );
-        return conversion.result;
-      }));
+          const conversion = await currencyConverter(
+            account.currency.code,
+            preferredCurrency,
+            parseFloat(account.currentBalance.toString()),
+          );
+          return conversion.result;
+        }),
+      );
 
       // Sum up all converted currencies
-      const totalBalance = accountWithConvertedCurrency.reduce(
-        (acc, balance) => acc + balance,
-        0,
-      );
+      const totalBalance = accountWithConvertedCurrency.reduce((acc, balance) => acc + balance, 0);
 
       // Format totalBalance to 2 decimal places
       const formattedTotalBalance = parseFloat(totalBalance.toFixed(2));
