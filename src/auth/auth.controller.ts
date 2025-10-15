@@ -33,16 +33,6 @@ export class AuthController {
   @ApiBody({
     description: 'User registration payload',
     type: RegisterDto,
-    examples: {
-      example: {
-        summary: 'Example',
-        value: {
-          name: 'Jane Doe',
-          email: 'jane.doe@example.com',
-          password: 'StrongPassw0rd!',
-        },
-      },
-    },
   })
   @ApiResponse({
     status: 201,
@@ -63,6 +53,7 @@ export class AuthController {
             'Name must be at least 3 characters long',
             'Email must be a valid email address',
             'Password must be at least 8 characters long',
+            'Currency id must be a number',
           ],
         },
         error: { type: 'string', example: 'Bad Request' },
@@ -263,7 +254,13 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtGuard)
   getCurrentUser(@CurrentUser() user: UserResponseDto): UserResponseDto {
-    return new UserResponseDto(user.id, user.email, user.name, user.emailLinked);
+    return new UserResponseDto(
+      user.id,
+      user.email,
+      user.name,
+      user.emailLinked,
+      user.preferredCurrency,
+    );
   }
 
   @ApiOperation({

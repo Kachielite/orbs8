@@ -102,6 +102,7 @@ Notification
 Account
 - GET  /account — get all accounts for authenticated user
 - GET  /account/:id — get specific account by ID
+- GET /account/summary - get account summary for authenticated user
 
 Category
 - GET  /category — get all categories (with optional search query)

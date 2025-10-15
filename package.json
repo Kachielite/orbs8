@@ -39,6 +39,7 @@
     "@nestjs/websockets": "^11.1.6",
     "@types/bcrypt": "^6.0.0",
     "@types/cron": "^2.4.3",
+    "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
     "bullmq": "^5.58.7",
     "class-transformer": "^0.5.1",
