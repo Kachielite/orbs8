@@ -26,5 +26,6 @@ import { User } from '../auth/entities/user.entity';
   ],
   controllers: [TransactionController],
   providers: [TransactionService, OpenAIConfig, CategoryService],
+  exports: [TransactionService],
 })
 export class TransactionModule {}
