@@ -143,8 +143,8 @@ export class AccountService {
         numberOfBanks,
       );
     } catch (error) {
-      logger.error(`Error fetching account summary for user: ${user.id}: ${error.message}`);
-      throw new InternalServerErrorException(`Error fetching account summary: ${error.message}`);
+      logger.error(`Error fetching account summary for user: ${user.id}: ${error}`);
+      throw new InternalServerErrorException(`Error fetching account summary`);
     }
   }
 
