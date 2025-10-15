@@ -5,9 +5,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from '../auth/entities/user.entity';
 import { Account } from './entities/account.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
+import { ExchangeRate } from './entities/exchange-rate.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Account, User, Transaction])],
+  imports: [TypeOrmModule.forFeature([Account, User, Transaction, ExchangeRate])],
   controllers: [AccountController],
   providers: [AccountService],
 })
