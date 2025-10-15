@@ -187,6 +187,62 @@ Notes
 - Ensure Redis is running before starting the application: `redis-server` or use Docker: `docker run -d -p 6379:6379 redis:alpine`
 
 
+## Currency exchange rate caching (AccountService)
+
+Purpose
+- Reduce external API calls for currency conversion by caching exchange rates in Postgres and refreshing them on a fixed schedule.
+
+Entity
+- `ExchangeRate` (`src/account/entities/exchange-rate.entity.ts`)
+  - `quotes` (string, unique): currency pair in the form BASE+QUOTE (e.g., `USDEUR`, `NGNUSD`)
+  - `rate` (decimal stored as string): latest known rate
+  - `lastUpdated` (timestamp): when the rate was last successfully refreshed
+  - `wasUpdated` (boolean): whether the last scheduled update window succeeded
+  - `createdAt`, `updatedAt`
+
+Where it’s wired
+- Registered in TypeORM: `src/common/configurations/db.config.ts` (entities list)
+- Available in Account module: `src/account/account.module.ts` (TypeOrmModule.forFeature)
+- Used by: `src/account/account.service.ts`
+
+Update schedule and windows
+- Refresh windows (server local time): 06:00, 12:00, 18:00 (15-minute window each)
+  - Inside a window: always attempt to fetch fresh from the external API and persist; fallback to cached value if fetch fails and a cached value exists.
+  - Outside a window: use cached value. If `wasUpdated === false`, attempt a refresh once; on failure, still return cached.
+- Retry policy: up to 2 retries with exponential backoff on fetch.
+
+Behavior and fallbacks
+- If an external fetch fails and we already have a row in DB, return the cached `rate` and mark `wasUpdated = false`.
+- If no cached row exists yet, retry up to 2 times. If all attempts fail, the error bubbles up.
+- Precision: `rate` is stored as a decimal string for accuracy, parsed to number when used.
+- Concurrency: `quotes` is unique; in rare concurrent updates, a DB conflict may occur. Consider using upserts if needed.
+
+How Account summary uses it
+- File: `src/account/account.service.ts`
+  - Private methods:
+    - `getCachedExchangeRate(from: string, to: string): Promise<number>` — main entry for cached rate retrieval
+    - `isWithinUpdateWindow(date?: Date): boolean` — determines if we are in a refresh window
+    - `fetchRateWithRetries(from, to, retries=2)` — calls external converter with backoff
+  - In `accountSummary(...)`:
+    - Builds `quotes` using cached rates for each distinct currency (key remains `<preferred><other>` e.g., `USDNGN`).
+    - Converts balances to the user’s preferred currency by `amount * rate`.
+
+External API and logging
+- External call: `src/common/utils/currency-converter.util.ts`
+  - Logs only `error.message` to avoid circular JSON from Axios error objects.
+
+Try it
+- Start the app, then hit `GET /account/summary` as an authenticated user with accounts in multiple currencies. You should see:
+  - First call around a window: attempted fresh fetch and DB persistence
+  - Later calls: cached values used until the next window
+- Table `exchange_rate` is auto-created in dev via TypeORM `synchronize=true`.
+
+Tuning knobs (quick edits)
+- Update window hours or length: see `isWithinUpdateWindow()` in `AccountService`.
+- Retry count/backoff: see `fetchRateWithRetries()` in `AccountService`.
+- Quotes key format: currently `from+to` in DB, and `preferred+other` for the summary `quotes` response.
+
+
 ## Project structure
 
 Core modules:

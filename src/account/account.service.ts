@@ -8,12 +8,15 @@ import logger from '../common/utils/logger/logger';
 import { Transaction, TransactionType } from '../transaction/entities/transaction.entity';
 import { AccountSummaryDto } from './dto/account-summary.dto';
 import { currencyConverter } from '../common/utils/currency-converter.util';
+import { ExchangeRate } from './entities/exchange-rate.entity';
 
 @Injectable()
 export class AccountService {
   constructor(
     @InjectRepository(Account) private readonly accountRepository: Repository<Account>,
     @InjectRepository(Transaction) private readonly transactionRepository: Repository<Transaction>,
+    @InjectRepository(ExchangeRate)
+    private readonly exchangeRateRepository: Repository<ExchangeRate>,
   ) {}
 
   async findAll(user: Partial<User>): Promise<AccountDto[]> {
@@ -75,8 +78,10 @@ export class AccountService {
       ];
       const quotes: Record<string, number> = {};
       for (const code of uniqueCurrencies) {
-        const conversion = await currencyConverter(code, preferredCurrency, 1);
-        quotes[`${preferredCurrency}${code}`] = conversion.rate;
+        quotes[`${preferredCurrency}${code}`] = await this.getCachedExchangeRate(
+          code,
+          preferredCurrency,
+        );
       }
 
       // Get unique number of banks
@@ -89,12 +94,9 @@ export class AccountService {
             return parseFloat(account.currentBalance.toString());
           }
 
-          const conversion = await currencyConverter(
-            account.currency.code,
-            preferredCurrency,
-            parseFloat(account.currentBalance.toString()),
-          );
-          return conversion.result;
+          const rate = await this.getCachedExchangeRate(account.currency.code, preferredCurrency);
+          const amount = parseFloat(account.currentBalance.toString());
+          return rate * amount;
         }),
       );
 
@@ -143,9 +145,95 @@ export class AccountService {
         numberOfBanks,
       );
     } catch (error) {
-      logger.error(`Error fetching account summary for user: ${user.id}: ${error}`);
-      throw new InternalServerErrorException(`Error fetching account summary`);
+      logger.error(`Error fetching account summary for user: ${user.id}: ${error.message}`);
+      throw new InternalServerErrorException(`Error fetching account summary: ${error.message}`);
     }
+  }
+
+  // Cached exchange rate handling with scheduled updates and fallbacks
+  private isWithinUpdateWindow(date: Date = new Date()): boolean {
+    const HOUR_WINDOWS = [6, 12, 18];
+    const WINDOW_MINUTES = 15; // 15-minute window
+    const now = date;
+    const currentHour = now.getHours();
+    const currentMinutes = now.getMinutes();
+    return HOUR_WINDOWS.some((h) => currentHour === h && currentMinutes < WINDOW_MINUTES);
+  }
+
+  private async fetchRateWithRetries(from: string, to: string, retries = 2): Promise<number> {
+    let lastErrorMessage: string | null = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const conversion = await currencyConverter(from, to, 1);
+        return conversion.rate;
+      } catch (err: unknown) {
+        lastErrorMessage = err instanceof Error ? err.message : String(err);
+        const delayMs = 200 * Math.pow(2, attempt);
+        await new Promise((res) => setTimeout(res, delayMs));
+      }
+    }
+    throw new Error(lastErrorMessage ?? 'Failed to fetch exchange rate');
+  }
+
+  private async getCachedExchangeRate(from: string, to: string): Promise<number> {
+    const pair = `${from}${to}`;
+    const withinWindow = this.isWithinUpdateWindow();
+
+    // Fetch existing record if any
+    let record = await this.exchangeRateRepository.findOne({ where: { quotes: pair } });
+
+    const tryUpdate = async () => {
+      try {
+        const rate = await this.fetchRateWithRetries(from, to, 2);
+        if (!record) {
+          record = this.exchangeRateRepository.create({
+            quotes: pair,
+            rate: rate.toString(),
+            lastUpdated: new Date(),
+            wasUpdated: true,
+          });
+        } else {
+          record.rate = rate.toString();
+          record.lastUpdated = new Date();
+          record.wasUpdated = true;
+        }
+        await this.exchangeRateRepository.save(record);
+        return rate;
+      } catch (err) {
+        // Mark as not updated if record exists
+        if (record) {
+          record.wasUpdated = false;
+          await this.exchangeRateRepository.save(record);
+          // Use cached value
+          return parseFloat(record.rate);
+        }
+        if (err instanceof Error) {
+          throw err;
+        }
+        throw new Error('Failed to update exchange rate');
+      }
+    };
+
+    if (withinWindow) {
+      // During window, prefer fresh update; fallback to cache
+      return await tryUpdate();
+    }
+
+    // Outside window
+    if (record) {
+      if (!record.wasUpdated) {
+        // Attempt to update if previous window failed
+        try {
+          return await tryUpdate();
+        } catch {
+          return parseFloat(record.rate);
+        }
+      }
+      return parseFloat(record.rate);
+    }
+
+    // No record exists, fetch now
+    return await tryUpdate();
   }
 
   private convertToDTO(account: Account): AccountDto {

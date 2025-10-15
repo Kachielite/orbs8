@@ -17,7 +17,8 @@ export const currencyConverter = async (
       exchange: `${response.data.query.from}${response.data.query.to}`,
     } as Conversion;
   } catch (error) {
-    logger.error('Error fetching currency rate:', error);
+    const message = error instanceof Error ? error.message : String(error);
+    logger.error(`Error fetching currency rate: ${message}`);
     throw error;
   }
 };
