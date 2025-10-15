@@ -3,12 +3,14 @@ import { AppModule } from './app/app.module';
 import { WinstonLogger } from './common/utils/logger/WinstonLogger.service';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
     bufferLogs: true,
   });
   app.useLogger(new WinstonLogger());
+  app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true, // Remove properties that are not defined in the DTO
@@ -44,4 +46,4 @@ async function bootstrap() {
   });
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+void bootstrap();

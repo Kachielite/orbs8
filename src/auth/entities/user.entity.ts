@@ -40,8 +40,8 @@ export class User {
   @Column({ default: false })
   emailLinked: boolean;
 
-  @Column({ nullable: true, type: 'int', default: 1 })
-  preferredCurrency: number;
+  @Column({ nullable: true, type: 'text', default: 'USD' })
+  preferredCurrency: string;
 
   @CreateDateColumn()
   createdAt: Date;

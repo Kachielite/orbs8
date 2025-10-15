@@ -5,8 +5,9 @@ import { Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { AccountDto } from './dto/account.dto';
 import logger from '../common/utils/logger/logger';
-import { Transaction } from '../transaction/entities/transaction.entity';
+import { Transaction, TransactionType } from '../transaction/entities/transaction.entity';
 import { AccountSummaryDto } from './dto/account-summary.dto';
+import { currencyConverter } from '../common/utils/currency-converter.util';
 
 @Injectable()
 export class AccountService {
@@ -59,48 +60,71 @@ export class AccountService {
     try {
       logger.info(`Fetching account summary for user: ${user.id}`);
 
-      // Get total balance and number of accounts
-      const accountData = (await this.accountRepository
-        .createQueryBuilder('account')
-        .select('SUM(account.currentBalance)', 'totalBalance')
-        .addSelect('COUNT(account.id)', 'numberOfAccounts')
-        .where('account.user.id = :userId', { userId: user.id })
-        .getRawOne()) as { totalBalance: string; numberOfAccounts: string } | null;
+      // Get User Preferred Currency
+      const preferredCurrency = user.preferredCurrency || 'USD';
 
-      // Get spend trend
-      const spendQuery = `
-        WITH current_period AS (
-          SELECT SUM(amount) AS total
-          FROM transaction
-          WHERE "userId" = ? AND type = 'debit'
-            AND "transactionDate" >= CURRENT_DATE - INTERVAL '30 days'
-        ),
-        previous_period AS (
-          SELECT SUM(amount) AS total
-          FROM transaction
-          WHERE "userId" = ? AND type = 'debit'
-            AND "transactionDate" >= CURRENT_DATE - INTERVAL '60 days'
-            AND "transactionDate" < CURRENT_DATE - INTERVAL '30 days'
-        )
-        SELECT
-          c.total AS current_total,
-          p.total AS previous_total,
-          ROUND(((c.total - p.total) / NULLIF(p.total, 0)) * 100, 2) AS percent_change
-        FROM current_period c, previous_period p;
-      `;
-      const spendResult: Array<{
-        current_total: string | null;
-        previous_total: string | null;
-        percent_change: string | null;
-      }> = await this.transactionRepository.query(spendQuery, [user.id, user.id]);
+      // Get User Bank Accounts
+      const accounts = await this.accountRepository.find({
+        where: { user: { id: user.id } },
+        relations: ['user', 'currency', 'bank'],
+      });
 
-      const totalBalance = parseFloat(accountData?.totalBalance || '0') || 0;
-      const numberOfAccounts = parseInt(accountData?.numberOfAccounts || '0') || 0;
-      const spendChange = parseFloat(String(spendResult[0]?.percent_change || '0')) || 0;
+      // Convert currencies to preferred currency
+      const accountWithConvertedCurrency = accounts.map(async (account) => {
+        if (account.currency.code === preferredCurrency) {
+          return parseFloat(account.currentBalance.toString());
+        }
 
-      return new AccountSummaryDto(totalBalance, spendChange, numberOfAccounts);
+        return currencyConverter(
+          account.currency.code,
+          preferredCurrency,
+          parseFloat(account.currentBalance.toString()),
+        );
+      });
+
+      // Sum up all converted currencies
+      const totalBalance = (await Promise.all(accountWithConvertedCurrency)).reduce(
+        (acc, balance) => acc + balance,
+        0,
+      );
+
+      // Format totalBalance to 2 decimal places
+      const formattedTotalBalance = parseFloat(totalBalance.toFixed(2));
+
+      // Get spend trend using QueryBuilder to avoid raw SQL syntax issues
+      const now = new Date();
+      const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+
+      const currentRaw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('SUM(t.amount)', 'total')
+        .where('t.userId = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
+        .andWhere('t.transactionDate >= :fromDate', { fromDate: thirtyDaysAgo })
+        .getRawOne<{ total: string | null }>();
+
+      const previousRaw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('SUM(t.amount)', 'total')
+        .where('t.userId = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
+        .andWhere('t.transactionDate >= :fromDate', { fromDate: sixtyDaysAgo })
+        .andWhere('t.transactionDate < :toDate', { toDate: thirtyDaysAgo })
+        .getRawOne<{ total: string | null }>();
+
+      const currentTotal = parseFloat(currentRaw?.total ?? '0') || 0;
+      const previousTotal = parseFloat(previousRaw?.total ?? '0') || 0;
+
+      const spendChange =
+        previousTotal > 0
+          ? Number((((currentTotal - previousTotal) / previousTotal) * 100).toFixed(2))
+          : 0;
+      const numberOfAccounts = accounts.length;
+
+      return new AccountSummaryDto(formattedTotalBalance, spendChange, numberOfAccounts);
     } catch (error) {
-      logger.error(`Error fetching account summary for user: ${user.id}: ${error.message}`);
+      logger.error(`Error fetching account summary for user: ${user.id}: ${error}`);
       throw new InternalServerErrorException(`Error fetching account summary: ${error.message}`);
     }
   }

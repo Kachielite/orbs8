@@ -52,6 +52,45 @@ export class AccountController {
     return await this.accountService.findAll(user);
   }
 
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Get account summary',
+    description:
+      'Returns account summary including total balance, spend change, and number of accounts for the authenticated user.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Returns account summary',
+    type: AccountSummaryDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'Error fetching account summary: <details>' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async accountSummary(@CurrentUser() user: Partial<User>) {
+    return await this.accountService.accountSummary(user);
+  }
+
   @Get(':id')
   @ApiOperation({
     summary: 'Get an account by ID',
@@ -101,44 +140,5 @@ export class AccountController {
   })
   async findOne(@Param('id') id: string, @CurrentUser() user: Partial<User>) {
     return await this.accountService.findOne(+id, user);
-  }
-
-  @Get('summary')
-  @ApiOperation({
-    summary: 'Get account summary',
-    description:
-      'Returns account summary including total balance, spend change, and number of accounts for the authenticated user.',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Returns account summary',
-    type: AccountSummaryDto,
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Unauthorized - JWT token is missing or invalid',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 401 },
-        message: { type: 'string', example: 'Unauthorized' },
-        error: { type: 'string', example: 'Unauthorized' },
-      },
-    },
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Internal server error',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 500 },
-        message: { type: 'string', example: 'Error fetching account summary: <details>' },
-        error: { type: 'string', example: 'Internal Server Error' },
-      },
-    },
-  })
-  async accountSummary(@CurrentUser() user: Partial<User>) {
-    return await this.accountService.accountSummary(user);
   }
 }

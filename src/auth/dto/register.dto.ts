@@ -22,8 +22,8 @@ export class RegisterDto {
   @MaxLength(20, { message: 'Password must be at most 20 characters long' })
   password: string;
 
-  @ApiProperty({ description: 'Currency ID of the user', example: 1 })
-  @IsNotEmpty({ message: 'Currency ID is required' })
-  @IsString({ message: 'Currency ID must be a string' })
-  currencyId: number;
+  @ApiProperty({ description: 'Currency code of the user', example: 'USD' })
+  @IsNotEmpty({ message: 'Currency code is required' })
+  @IsString({ message: 'Currency code must be a string' })
+  currencyCode: string;
 }
