@@ -144,6 +144,7 @@ export class AccountService {
       account.id,
       account.accountName,
       account.accountNumber,
+      account.currentBalance,
       account.currency.name,
       account.currency.symbol,
       account.bank.id,
