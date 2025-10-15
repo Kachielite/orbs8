@@ -79,6 +79,9 @@ export class AccountService {
         quotes[`${preferredCurrency}${code}`] = conversion.rate;
       }
 
+      // Get unique number of banks
+      const numberOfBanks = [...new Set(accounts.map((a) => a.bank.id))].length;
+
       // Convert currencies to preferred currency
       const accountWithConvertedCurrency = await Promise.all(
         accounts.map(async (account) => {
@@ -132,9 +135,15 @@ export class AccountService {
           : 0;
       const numberOfAccounts = accounts.length;
 
-      return new AccountSummaryDto(formattedTotalBalance, spendChange, numberOfAccounts, quotes);
+      return new AccountSummaryDto(
+        formattedTotalBalance,
+        spendChange,
+        numberOfAccounts,
+        quotes,
+        numberOfBanks,
+      );
     } catch (error) {
-      logger.error(`Error fetching account summary for user: ${user.id}: ${error}`);
+      logger.error(`Error fetching account summary for user: ${user.id}: ${error.message}`);
       throw new InternalServerErrorException(`Error fetching account summary: ${error.message}`);
     }
   }

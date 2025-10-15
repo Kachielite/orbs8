@@ -12,16 +12,20 @@ export class AccountSummaryDto {
     example: '{ "USDAUD": 1.278342, "USDEUR": 1.278342, "USDGBP": 0.908019, }',
   })
   public quotes: Record<string, number>;
+  @ApiProperty({ description: 'The number of banks linked to the user', example: 1 })
+  numberOfBanks: number;
 
   constructor(
     totalBalance: number,
     spendChange: number,
     numberOfAccounts: number,
     quotes: Record<string, number>,
+    numberOfBanks: number,
   ) {
     this.totalBalance = totalBalance;
     this.spendChange = spendChange;
     this.numberOfAccounts = numberOfAccounts;
     this.quotes = quotes;
+    this.numberOfBanks = numberOfBanks;
   }
 }
