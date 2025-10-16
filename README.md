@@ -200,47 +200,54 @@ Entity
   - `wasUpdated` (boolean): whether the last scheduled update window succeeded
   - `createdAt`, `updatedAt`
 
-Where it’s wired
-- Registered in TypeORM: `src/common/configurations/db.config.ts` (entities list)
-- Available in Account module: `src/account/account.module.ts` (TypeOrmModule.forFeature)
-- Used by: `src/account/account.service.ts`
+Where it’s wired (new)
+- New centralized service: `src/exchange-rate/exchange-rate.service.ts` (`ExchangeRateService`).
+  - Encapsulates cached lookups, on-demand fetch+persist, and a scheduled refresh job.
+- New module: `src/exchange-rate/exchange-rate.module.ts` (exports `ExchangeRateService`).
+- The service registers the `ExchangeRate` entity with TypeORM and is exported via `ExchangeRateModule` so any module that imports it can inject the service.
+- `ScheduleModule.forRoot()` is enabled in `src/app/app.module.ts`, so cron jobs will run when the app starts.
+- Imported by:
+  - `AccountModule` (so `AccountService` now injects `ExchangeRateService`)
+  - `TransactionModule` (imported so transaction code can inject `ExchangeRateService` as needed)
 
-Update schedule and windows
-- Refresh windows (server local time): 06:00, 12:00, 18:00 (15-minute window each)
-  - Inside a window: always attempt to fetch fresh from the external API and persist; fallback to cached value if fetch fails and a cached value exists.
-  - Outside a window: use cached value. If `wasUpdated === false`, attempt a refresh once; on failure, still return cached.
-- Retry policy: up to 2 retries with exponential backoff on fetch.
+Primary API
+- ExchangeRateService.getRate(from: string, to: string): Promise<number>
+  - Returns the latest known rate for the pair. If no DB record exists, the service fetches from the external converter, persists the pair, and returns the rate.
+
+Update schedule and windows (behavior)
+- A scheduled job runs every 5 minutes (Cron: `*/5 * * * *`) but only performs network updates during configured update windows.
+- Default windows (server local time): 06:00, 12:00, 18:00 — each is a 15-minute window (first 15 minutes of that hour).
+  - Inside a window: the scheduled job attempts to fetch fresh rates for all stored pairs and persists them; on a per-pair failure, it marks `wasUpdated=false` and leaves the previous `rate` in place.
+  - Outside a window: `getRate` will return cached values. If a stored record has `wasUpdated === false`, the service may attempt a single refresh (and fall back to cached rate on failure).
+- Retry policy: upstream fetches use a small retry/backoff (default: up to 2 retries) to handle transient network errors.
 
 Behavior and fallbacks
-- If an external fetch fails and we already have a row in DB, return the cached `rate` and mark `wasUpdated = false`.
-- If no cached row exists yet, retry up to 2 times. If all attempts fail, the error bubbles up.
-- Precision: `rate` is stored as a decimal string for accuracy, parsed to number when used.
-- Concurrency: `quotes` is unique; in rare concurrent updates, a DB conflict may occur. Consider using upserts if needed.
+- If an external fetch fails and a DB row exists, the cached `rate` is returned and `wasUpdated` is set to `false` for that record.
+- If no cached row exists, `getRate` will attempt to fetch (with retries). If all attempts fail, the error bubbles to the caller.
+- Rates are stored as decimal strings in the DB for precision and parsed to numbers when returned.
+- Concurrency: `quotes` is unique; consider upserts or transaction-safe upsert logic if you expect high write concurrency.
 
-How Account summary uses it
-- File: `src/account/account.service.ts`
-  - Private methods:
-    - `getCachedExchangeRate(from: string, to: string): Promise<number>` — main entry for cached rate retrieval
-    - `isWithinUpdateWindow(date?: Date): boolean` — determines if we are in a refresh window
-    - `fetchRateWithRetries(from, to, retries=2)` — calls external converter with backoff
-  - In `accountSummary(...)`:
-    - Builds `quotes` using cached rates for each distinct currency (key remains `<preferred><other>` e.g., `USDNGN`).
-    - Converts balances to the user’s preferred currency by `amount * rate`.
+How `AccountService` (and others) uses it
+- Replace previous private caching logic with DI:
+  - constructor(private readonly exchangeRateService: ExchangeRateService) { }
+  - Example: const rate = await this.exchangeRateService.getRate('EUR', 'USD');
+- In `accountSummary(...)` the app builds `quotes` (keys like `<preferred><other>` e.g., `USDNGN`) using `getRate` and converts balances with `amount * rate`.
 
 External API and logging
-- External call: `src/common/utils/currency-converter.util.ts`
-  - Logs only `error.message` to avoid circular JSON from Axios error objects.
+- External call: `src/common/utils/currency-converter.util.ts` (same upstream converter used for on-demand fetches).
+- Logs: the service logs successes and per-pair failures; errors are reduced to message strings to avoid circular JSON from Axios error objects.
 
 Try it
-- Start the app, then hit `GET /account/summary` as an authenticated user with accounts in multiple currencies. You should see:
-  - First call around a window: attempted fresh fetch and DB persistence
-  - Later calls: cached values used until the next window
-- Table `exchange_rate` is auto-created in dev via TypeORM `synchronize=true`.
+- Start the app, then hit `GET /account/summary` as an authenticated user with accounts in multiple currencies. You should observe:
+  - If called during an update window, recent pairs may be refreshed and persisted.
+  - Otherwise cached values will be returned until the next successful window update.
+- New pairs will be created on-demand when first requested by `getRate`.
 
-Tuning knobs (quick edits)
-- Update window hours or length: see `isWithinUpdateWindow()` in `AccountService`.
-- Retry count/backoff: see `fetchRateWithRetries()` in `AccountService`.
-- Quotes key format: currently `from+to` in DB, and `preferred+other` for the summary `quotes` response.
+Tuning knobs
+- Update window hours or length: modify `HOUR_WINDOWS` or `WINDOW_MINUTES` in `src/exchange-rate/exchange-rate.service.ts`.
+- Retry count/backoff: change the retry logic in `fetchRateWithRetries()` in `ExchangeRateService`.
+- Quotes key format: currently the DB stores `quotes` as `from+to` (e.g., `EURUSD`). If you need variable-length currency codes or more explicit storage, consider splitting into `from` and `to` columns and adding a migration.
+- Triggering a manual refresh: you can add an admin endpoint that calls a public refresh method on `ExchangeRateService` to force-update all pairs immediately (useful for debugging).
 
 
 ## Project structure
