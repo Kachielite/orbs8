@@ -41,7 +41,7 @@ export class ExchangeRateService {
   // Exposed method for other modules to get the latest known rate for a pair.
 
   // It updates all known pairs. Failures for individual pairs are recorded by setting wasUpdated=false.
-  @Cron('*/5 * * * *')
+  @Cron('*/60 * * * *')
   async handleScheduledUpdate(): Promise<void> {
     try {
       if (!this.isWithinUpdateWindow()) {
