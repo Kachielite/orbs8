@@ -66,6 +66,49 @@ export class TransactionController {
     example: 'DESC',
     description: 'Sort direction',
   })
+  @ApiQuery({
+    name: 'categoryIds',
+    required: false,
+    type: Array,
+    description: 'Filter by category ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'accountIds',
+    required: false,
+    type: Array,
+    description: 'Filter by account ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'bankIds',
+    required: false,
+    type: Array,
+    description: 'Filter by bank ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'Filter by start date (YYYY-MM-DD)',
+    example: '2023-01-01',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'Filter by end date (YYYY-MM-DD)',
+    example: '2023-12-31',
+  })
+  @ApiQuery({
+    name: 'transactionType',
+    required: false,
+    type: String,
+    enum: ['credit', 'debit'],
+    example: 'credit',
+    description: 'Filter by transaction type',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns a paginated list of transactions',
@@ -97,78 +140,6 @@ export class TransactionController {
   })
   async findAll(@Query() query: GetTransactionQuery, @CurrentUser() user: Partial<User>) {
     return await this.transactionService.findAll(user, query);
-  }
-
-  @Get('/account/:accountId')
-  @ApiOperation({
-    summary: 'Get transactions by account',
-    description:
-      'Returns a paginated list of transactions for the given account belonging to the authenticated user.',
-  })
-  @ApiParam({ name: 'accountId', type: Number, description: 'Account ID', example: 123 })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Page number (min 1)',
-    example: 1,
-  })
-  @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Items per page (1-100)',
-    example: 10,
-  })
-  @ApiQuery({
-    name: 'search',
-    required: false,
-    type: String,
-    description: 'Filter by description or merchant (case-insensitive partial match)',
-    example: 'coffee',
-  })
-  @ApiQuery({
-    name: 'sort',
-    required: false,
-    type: String,
-    description: 'Sort field. Example: amount, date, createdAt',
-    example: 'date',
-  })
-  @ApiQuery({
-    name: 'order',
-    required: false,
-    type: String,
-    enum: ['ASC', 'DESC', 'asc', 'desc'],
-    example: 'DESC',
-    description: 'Sort direction',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Returns transactions for the specified account',
-    type: PaginatedResponseDto<TransactionDto>,
-  })
-  @ApiResponse({
-    status: 500,
-    description: 'Internal server error',
-    schema: {
-      type: 'object',
-      properties: {
-        statusCode: { type: 'number', example: 500 },
-        message: {
-          type: 'string',
-          example: 'Error fetching transactions for user ID: 123: <details>',
-        },
-        error: { type: 'string', example: 'Internal Server Error' },
-      },
-    },
-  })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
-  async findAllByAccount(
-    @Query() query: GetTransactionQuery,
-    @Param('accountId') accountId: string,
-    @CurrentUser() user: Partial<User>,
-  ) {
-    return await this.transactionService.findAllByAccount(+accountId, query, user);
   }
 
   @Get(':id')

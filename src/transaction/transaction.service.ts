@@ -1,13 +1,8 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ILike, Repository } from 'typeorm';
+import { Between, ILike, In, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
@@ -73,11 +68,20 @@ export class TransactionService {
 
     try {
       logger.info(`Fetching transactions for user: ${user.id}`);
+      const where = {
+        ...(search ? { description: ILike(`%${search}%`) } : {}),
+        ...(query.categoryIds ? { category: { id: In(query.categoryIds) } } : {}),
+        ...(query.startDate && query.endDate
+          ? { transactionDate: Between(new Date(query.startDate), new Date(query.endDate)) }
+          : {}),
+        ...(query.bankIds ? { account: { bank: { id: In(query.bankIds) } } } : {}),
+        ...(query.transactionType ? { type: query.transactionType } : {}),
+        ...(query.accountIds ? { account: { id: In(query.accountIds) } } : {}),
+        user: { id: user.id },
+      };
+
       const [transactions, total] = await this.transactionRepository.findAndCount({
-        where: {
-          ...(search ? { description: ILike(`%${search}%`) } : {}),
-          user: { id: user.id },
-        },
+        where: where,
         relations: ['user', 'currency', 'category', 'account', 'account.bank'],
         skip,
         take,
@@ -119,41 +123,6 @@ export class TransactionService {
     }
   }
 
-  async findAllByAccount(
-    accountId: number,
-    query: GetTransactionQuery,
-    user: Partial<User>,
-  ): Promise<PaginatedResponseDto<TransactionDto>> {
-    logger.info(`Fetching transactions for account: ${accountId}`);
-    try {
-      const paginationParams = this.createPaginationParams(query);
-      const { page, limit, skip, take, order, search } = paginationParams;
-
-      const [transactions, total] = await this.transactionRepository.findAndCount({
-        where: {
-          ...(search ? { description: ILike(`%${search}%`) } : {}),
-          account: { id: accountId },
-          user: { id: user.id },
-        },
-        relations: ['user', 'category', 'account', 'account.bank', 'currency'],
-        skip,
-        take,
-        order,
-      });
-
-      const hasNext = skip + take < total;
-      const hasPrevious = skip > 0;
-      const transactionsDto = transactions.map((transaction) => this.convertToDto(transaction));
-
-      return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
-    } catch (error) {
-      logger.error(`Error stack: ${error}`);
-      logger.error(`Error fetching transactions for account ${accountId}: ${error.message}`);
-      throw new InternalServerErrorException(
-        `Error fetching transactions for account ${accountId}: ${error.message}`,
-      );
-    }
-  }
 
   async create(user: Partial<User>, emailText: string): Promise<GeneralResponseDto> {
     try {
@@ -354,11 +323,21 @@ export class TransactionService {
       order: query.order,
     };
 
-    return paginationUtil<Transaction>({
+    const paginationParams = paginationUtil<Transaction>({
       query: typedQuery,
       allowedSortFields: this.allowedSortFields,
       defaultSortField: 'createdAt' as keyof Transaction,
     });
+
+    return {
+      ...paginationParams,
+      categoryIds: query.categoryIds,
+      startDate: query.startDate,
+      endDate: query.endDate,
+      bankIds: query.bankIds,
+      transactionType: query.transactionType,
+      accountIds: query.accountIds,
+    };
   }
 
   private appendToRegex(oldRegex: string | null, newTerm: string): string {
