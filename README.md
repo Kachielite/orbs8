@@ -110,7 +110,7 @@ Category
 
 Transaction
 - GET  /transaction — get all transactions (paginated, with search, sort, and filter options)
-- GET  /transaction/account/:accountId — get transactions for specific account (paginated, with search, sort, and filter options)
+- GET  /transaction/summary — get transaction summary for authenticated user (requires startDate and endDate query params)
 - GET  /transaction/:id — get specific transaction by ID
 - PUT  /transaction/:id — update transaction fields
 
