@@ -23,11 +23,20 @@ export class TransactionDto {
   @ApiProperty({ description: 'The category of the transaction', example: 'Salary' })
   category: string;
 
+  @ApiProperty({ description: 'The category of the transaction', example: 1 })
+  categoryId: number;
+
   @ApiProperty({ description: 'The account of the transaction', example: 'Checking' })
   account: string;
 
+  @ApiProperty({ description: 'The account of the transaction', example: 1 })
+  accountId: number;
+
   @ApiProperty({ description: 'The bank of the transaction', example: 'Bank of America' })
   bank: string;
+
+  @ApiProperty({ description: 'The bank of the transaction', example: 1 })
+  bankId: number;
 
   @ApiProperty({ description: 'The date of the transaction', example: '2023-01-01' })
   createdAt: Date;
@@ -40,8 +49,11 @@ export class TransactionDto {
     description: string,
     transactionDate: Date,
     category: string,
+    categoryId: number,
     account: string,
+    accountId: number,
     bank: string,
+    bankId: number,
     createdAt: Date,
   ) {
     this.id = id;

@@ -517,8 +517,11 @@ export class TransactionService {
       transaction.description,
       transaction.transactionDate,
       transaction.category.name,
+      transaction.category.id,
       transaction.account.accountNumber,
+      transaction.account.id,
       transaction.account.bank.name,
+      transaction.account.bank.id,
       transaction.createdAt,
     );
   }
