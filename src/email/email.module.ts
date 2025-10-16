@@ -1,4 +1,4 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { EmailService } from './email.service';
 import { EmailController } from './email.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -6,8 +6,7 @@ import { Email } from './entities/email.entity';
 import { EmailWorker } from './email.worker';
 import { User } from '../auth/entities/user.entity';
 import { BullModule } from '@nestjs/bullmq';
-import { TransactionService } from '../transaction/transaction.service';
-import { Transaction } from '../transaction/entities/transaction.entity';
+import { TransactionModule } from '../transaction/transaction.module';
 import { Category } from '../category/entities/category.entity';
 import { CategoryFeedback } from '../category/entities/category-feedback.entity';
 import { Bank } from '../bank/entities/bank.entity';
@@ -21,10 +20,11 @@ import { NotificationModule } from '../notification/notification.module';
 
 @Module({
   imports: [
+    // Register only entities used directly by EmailModule. TransactionModule
+    // already registers Transaction and related entities and exports TransactionService.
     TypeOrmModule.forFeature([
       Email,
       User,
-      Transaction,
       Category,
       CategoryFeedback,
       Bank,
@@ -32,18 +32,12 @@ import { NotificationModule } from '../notification/notification.module';
       Currency,
       Notification,
     ]),
+    TransactionModule,
     BullModule.registerQueue({ name: 'email-sync' }),
     forwardRef(() => NotificationModule),
   ],
   controllers: [EmailController],
-  providers: [
-    EmailService,
-    EmailWorker,
-    TransactionService,
-    OpenAIConfig,
-    CategoryService,
-    EmailGateway,
-  ],
+  providers: [EmailService, EmailWorker, OpenAIConfig, CategoryService, EmailGateway],
   exports: [EmailService, EmailGateway],
 })
 export class EmailModule {}

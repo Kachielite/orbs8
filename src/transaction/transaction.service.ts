@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,6 +23,7 @@ import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
 import { TopTransactionDto, TransactionSummaryDto } from './dto/transaction-summary.dto';
+import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
 
 @Injectable()
 export class TransactionService {
@@ -64,6 +60,7 @@ export class TransactionService {
     @InjectRepository(Account) private readonly accountRepository: Repository<Account>,
     private readonly openAI: OpenAIConfig,
     private readonly categoryService: CategoryService,
+    private readonly exchangeRateService: ExchangeRateService,
   ) {}
 
   async findAll(
@@ -88,7 +85,7 @@ export class TransactionService {
 
       const [transactions, total] = await this.transactionRepository.findAndCount({
         where: where,
-        relations: ['user', 'currency', 'category', 'account', 'account.bank'],
+        relations: ['user', 'currency', 'category', 'account', 'account.bank', 'account.currency'],
         skip,
         take,
         order,
@@ -96,7 +93,14 @@ export class TransactionService {
 
       const hasNext = skip + take < total;
       const hasPrevious = skip > 0;
-      const transactionsDto = transactions.map((transaction) => this.convertToDto(transaction));
+
+      const preferredCurrency = user.preferredCurrency || 'USD';
+      const rateCache = new Map<string, number>();
+      const transactionsDto = await Promise.all(
+        transactions.map((transaction) =>
+          this.convertToDto(transaction, preferredCurrency, rateCache),
+        ),
+      );
 
       return new PaginatedResponseDto(transactionsDto, total, page, limit, hasNext, hasPrevious);
     } catch (error) {
@@ -110,14 +114,16 @@ export class TransactionService {
       logger.info(`Fetching transaction with ID: ${id}`);
       const transaction = await this.transactionRepository.findOne({
         where: { id, user: { id: user.id } },
-        relations: ['user', 'category', 'account', 'account.bank', 'currency'],
+        relations: ['user', 'category', 'account', 'account.bank', 'account.currency', 'currency'],
       });
 
       if (!transaction) {
         throw new NotFoundException(`Transaction with ID ${id} not found for user ${user.id}`);
       }
 
-      return this.convertToDto(transaction);
+      const preferredCurrency = user.preferredCurrency || 'USD';
+      const rateCache = new Map<string, number>();
+      return await this.convertToDto(transaction, preferredCurrency, rateCache);
     } catch (error) {
       logger.error(`Error fetching transaction with ID: ${id}: ${error.message}`);
       if (error instanceof NotFoundException) {
@@ -139,30 +145,103 @@ export class TransactionService {
 
       const start = new Date(startDate);
       const end = new Date(endDate);
+      const preferredCurrency = user.preferredCurrency || 'USD';
 
-      // Get total spend (debit transactions)
-      const totalSpendResult: { sum: string | null } | undefined = await this.transactionRepository
-        .createQueryBuilder('t')
-        .select('SUM(t.amount)', 'sum')
-        .where('t.user.id = :userId', { userId: user.id })
-        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
-        .andWhere('t.transactionDate >= :startDate', { startDate: start })
-        .andWhere('t.transactionDate <= :endDate', { endDate: end })
-        .getRawOne();
-      const totalSpend = parseFloat(totalSpendResult?.sum || '0');
+      // Fetch all debit transactions in the date range with needed relations
+      const debitTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.DEBIT,
+          transactionDate: Between(start, end),
+        },
+        relations: ['currency', 'category', 'account', 'account.currency'],
+      });
 
-      // Get total income (credit transactions)
-      const totalIncomeResult: { sum: string | null } | undefined = await this.transactionRepository
-        .createQueryBuilder('t')
-        .select('SUM(t.amount)', 'sum')
-        .where('t.user.id = :userId', { userId: user.id })
-        .andWhere('t.type = :type', { type: TransactionType.CREDIT })
-        .andWhere('t.transactionDate >= :startDate', { startDate: start })
-        .andWhere('t.transactionDate <= :endDate', { endDate: end })
-        .getRawOne();
-      const totalIncome = parseFloat(totalIncomeResult?.sum || '0');
+      // Convert each debit transaction to preferred currency and sum
+      let totalSpend = 0;
+      const spendByCategory = new Map<number, { name: string; amount: number }>();
 
-      // Get total transactions
+      const rateCache = new Map<string, number>();
+      for (const t of debitTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+
+        totalSpend += converted;
+
+        const catId = t.category?.id;
+        const catName = t.category?.name || 'Uncategorized';
+        if (catId) {
+          const prev = spendByCategory.get(catId) ?? { name: catName, amount: 0 };
+          prev.amount += converted;
+          spendByCategory.set(catId, prev);
+        }
+      }
+
+      // Get top spend by category
+      const topSpendByCategory = Array.from(spendByCategory.values())
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 4)
+        .map((r) => new TopTransactionDto(r.name, Number(r.amount.toFixed(2))));
+
+      // Fetch credit transactions and compute total income similarly
+      const creditTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.CREDIT,
+          transactionDate: Between(start, end),
+        },
+        relations: ['currency', 'category', 'account', 'account.currency'],
+      });
+
+      let totalIncome = 0;
+      const incomeByCategory = new Map<number, { name: string; amount: number }>();
+      // reuse the same rateCache for credits
+      for (const t of creditTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+
+        totalIncome += converted;
+
+        const catId = t.category?.id;
+        const catName = t.category?.name || 'Uncategorized';
+        if (catId) {
+          const prev = incomeByCategory.get(catId) ?? { name: catName, amount: 0 };
+          prev.amount += converted;
+          incomeByCategory.set(catId, prev);
+        }
+      }
+
+      const topSpendByCreditType = Array.from(incomeByCategory.values())
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 4)
+        .map((r) => new TopTransactionDto(r.name, Number(r.amount.toFixed(2))));
+
+      const topSpendByDebitType = topSpendByCategory; // same as top spend by category for debits
+
       const totalTransactions = await this.transactionRepository.count({
         where: {
           user: { id: user.id },
@@ -170,72 +249,12 @@ export class TransactionService {
         },
       });
 
-      // Get top spend by category (debit categories)
-      const topSpendByCategoryRaw = await this.transactionRepository
-        .createQueryBuilder('t')
-        .select('c.name', 'name')
-        .addSelect('SUM(t.amount)', 'amount')
-        .leftJoin('t.category', 'c')
-        .where('t.user.id = :userId', { userId: user.id })
-        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
-        .andWhere('t.transactionDate >= :startDate', { startDate: start })
-        .andWhere('t.transactionDate <= :endDate', { endDate: end })
-        .groupBy('c.id')
-        .addGroupBy('c.name')
-        .orderBy('SUM(t.amount)', 'DESC')
-        .limit(4)
-        .getRawMany();
-      const topSpendByCategory = topSpendByCategoryRaw.map(
-        (row: { name: string; amount: string }) =>
-          new TopTransactionDto(row.name, parseFloat(row.amount)),
-      );
-
-      // Get top spend by credit type (credit categories)
-      const topSpendByCreditTypeRaw = await this.transactionRepository
-        .createQueryBuilder('t')
-        .select('c.name', 'name')
-        .addSelect('SUM(t.amount)', 'amount')
-        .leftJoin('t.category', 'c')
-        .where('t.user.id = :userId', { userId: user.id })
-        .andWhere('t.type = :type', { type: TransactionType.CREDIT })
-        .andWhere('t.transactionDate >= :startDate', { startDate: start })
-        .andWhere('t.transactionDate <= :endDate', { endDate: end })
-        .groupBy('c.id')
-        .addGroupBy('c.name')
-        .orderBy('SUM(t.amount)', 'DESC')
-        .limit(4)
-        .getRawMany();
-      const topSpendByCreditType = topSpendByCreditTypeRaw.map(
-        (row: { name: string; amount: string }) =>
-          new TopTransactionDto(row.name, parseFloat(row.amount)),
-      );
-
-      // Get top spend by debit type (debit categories)
-      const topSpendByDebitTypeRaw = await this.transactionRepository
-        .createQueryBuilder('t')
-        .select('c.name', 'name')
-        .addSelect('SUM(t.amount)', 'amount')
-        .leftJoin('t.category', 'c')
-        .where('t.user.id = :userId', { userId: user.id })
-        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
-        .andWhere('t.transactionDate >= :startDate', { startDate: start })
-        .andWhere('t.transactionDate <= :endDate', { endDate: end })
-        .groupBy('c.id')
-        .addGroupBy('c.name')
-        .orderBy('SUM(t.amount)', 'DESC')
-        .limit(4)
-        .getRawMany();
-      const topSpendByDebitType = topSpendByDebitTypeRaw.map(
-        (row: { name: string; amount: string }) =>
-          new TopTransactionDto(row.name, parseFloat(row.amount)),
-      );
-
       const summaryDto = new TransactionSummaryDto();
       summaryDto.topSpendByCategory = topSpendByCategory;
       summaryDto.topSpendByCreditType = topSpendByCreditType;
       summaryDto.topSpendByDebitType = topSpendByDebitType;
-      summaryDto.totalSpend = totalSpend;
-      summaryDto.totalIncome = totalIncome;
+      summaryDto.totalSpend = Number(totalSpend.toFixed(2));
+      summaryDto.totalIncome = Number(totalIncome.toFixed(2));
       summaryDto.totalTransactions = totalTransactions;
 
       return summaryDto;
@@ -508,20 +527,38 @@ export class TransactionService {
     })) as TransactionDetails;
   }
 
-  private convertToDto(transaction: Transaction): TransactionDto {
+  private async convertToDto(
+    transaction: Transaction,
+    preferredCurrency = 'USD',
+    rateCache = new Map<string, number>(),
+  ): Promise<TransactionDto> {
+    const txCurrency =
+      transaction.account?.currency?.code || transaction.currency?.code || preferredCurrency;
+    const amount = Number(transaction.amount);
+    let convertedAmount = amount;
+    if (txCurrency !== preferredCurrency) {
+      const pairKey = `${txCurrency}${preferredCurrency}`;
+      let rate = rateCache.get(pairKey);
+      if (rate === undefined) {
+        rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+        rateCache.set(pairKey, rate);
+      }
+      convertedAmount = amount * rate;
+    }
+
     return new TransactionDto(
       transaction.id,
-      transaction.amount,
-      transaction.currency.code,
+      Number(convertedAmount.toFixed(2)),
+      preferredCurrency,
       transaction.type,
       transaction.description,
       transaction.transactionDate,
-      transaction.category.name,
-      transaction.category.id,
-      transaction.account.accountNumber,
-      transaction.account.id,
-      transaction.account.bank.name,
-      transaction.account.bank.id,
+      transaction.category?.name || 'Uncategorized',
+      transaction.category?.id || 0,
+      transaction.account?.accountName || '',
+      transaction.account?.id || 0,
+      transaction.account?.bank?.name || '',
+      transaction.account?.bank?.id || 0,
       transaction.createdAt,
     );
   }
