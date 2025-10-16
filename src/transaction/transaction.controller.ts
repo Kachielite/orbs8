@@ -17,6 +17,7 @@ import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
+import { TransactionSummaryDto } from './dto/transaction-summary.dto';
 
 @ApiTags('Transaction Management')
 @Controller('transaction')
@@ -140,6 +141,66 @@ export class TransactionController {
   })
   async findAll(@Query() query: GetTransactionQuery, @CurrentUser() user: Partial<User>) {
     return await this.transactionService.findAll(user, query);
+  }
+
+  @Get('summary')
+  @ApiOperation({
+    summary: 'Get transaction summary',
+    description:
+      'Returns a summary of transactions for the authenticated user, including total spend, total income, total transactions, and top categories by amount.',
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: true,
+    type: String,
+    description: 'Filter by start date (YYYY-MM-DD)',
+    example: '2023-01-01',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: true,
+    type: String,
+    description: 'Filter by end date (YYYY-MM-DD)',
+    example: '2023-12-31',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Transaction summary retrieved successfully',
+    type: TransactionSummaryDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: {
+          type: 'string',
+          example: 'Error fetching transaction summary for user 1: <details>',
+        },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async getTransactionSummary(
+    @CurrentUser() user: Partial<User>,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
+  ) {
+    return await this.transactionService.getTransactionSummary(user, startDate, endDate);
   }
 
   @Get(':id')

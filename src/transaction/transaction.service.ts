@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -27,6 +22,7 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
+import { TopTransactionDto, TransactionSummaryDto } from './dto/transaction-summary.dto';
 
 @Injectable()
 export class TransactionService {
@@ -124,6 +120,124 @@ export class TransactionService {
       }
       throw new InternalServerErrorException(
         `Error fetching transaction with ID: ${id}: ${error.message}`,
+      );
+    }
+  }
+
+  async getTransactionSummary(
+    user: Partial<User>,
+    startDate: string,
+    endDate: string,
+  ): Promise<TransactionSummaryDto> {
+    try {
+      logger.info(`Fetching transaction summary for user: ${user.id}`);
+
+      const start = new Date(startDate);
+      const end = new Date(endDate);
+
+      // Get total spend (debit transactions)
+      const totalSpendResult: { sum: string | null } | undefined = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('SUM(t.amount)', 'sum')
+        .where('t.user.id = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
+        .andWhere('t.transactionDate >= :startDate', { startDate: start })
+        .andWhere('t.transactionDate <= :endDate', { endDate: end })
+        .getRawOne();
+      const totalSpend = parseFloat(totalSpendResult?.sum || '0');
+
+      // Get total income (credit transactions)
+      const totalIncomeResult: { sum: string | null } | undefined = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('SUM(t.amount)', 'sum')
+        .where('t.user.id = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.CREDIT })
+        .andWhere('t.transactionDate >= :startDate', { startDate: start })
+        .andWhere('t.transactionDate <= :endDate', { endDate: end })
+        .getRawOne();
+      const totalIncome = parseFloat(totalIncomeResult?.sum || '0');
+
+      // Get total transactions
+      const totalTransactions = await this.transactionRepository.count({
+        where: {
+          user: { id: user.id },
+          transactionDate: Between(start, end),
+        },
+      });
+
+      // Get top spend by category (debit categories)
+      const topSpendByCategoryRaw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('c.name', 'name')
+        .addSelect('SUM(t.amount)', 'amount')
+        .leftJoin('t.category', 'c')
+        .where('t.user.id = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
+        .andWhere('t.transactionDate >= :startDate', { startDate: start })
+        .andWhere('t.transactionDate <= :endDate', { endDate: end })
+        .groupBy('c.id')
+        .addGroupBy('c.name')
+        .orderBy('SUM(t.amount)', 'DESC')
+        .limit(4)
+        .getRawMany();
+      const topSpendByCategory = topSpendByCategoryRaw.map(
+        (row: { name: string; amount: string }) =>
+          new TopTransactionDto(row.name, parseFloat(row.amount)),
+      );
+
+      // Get top spend by credit type (credit categories)
+      const topSpendByCreditTypeRaw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('c.name', 'name')
+        .addSelect('SUM(t.amount)', 'amount')
+        .leftJoin('t.category', 'c')
+        .where('t.user.id = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.CREDIT })
+        .andWhere('t.transactionDate >= :startDate', { startDate: start })
+        .andWhere('t.transactionDate <= :endDate', { endDate: end })
+        .groupBy('c.id')
+        .addGroupBy('c.name')
+        .orderBy('SUM(t.amount)', 'DESC')
+        .limit(4)
+        .getRawMany();
+      const topSpendByCreditType = topSpendByCreditTypeRaw.map(
+        (row: { name: string; amount: string }) =>
+          new TopTransactionDto(row.name, parseFloat(row.amount)),
+      );
+
+      // Get top spend by debit type (debit categories)
+      const topSpendByDebitTypeRaw = await this.transactionRepository
+        .createQueryBuilder('t')
+        .select('c.name', 'name')
+        .addSelect('SUM(t.amount)', 'amount')
+        .leftJoin('t.category', 'c')
+        .where('t.user.id = :userId', { userId: user.id })
+        .andWhere('t.type = :type', { type: TransactionType.DEBIT })
+        .andWhere('t.transactionDate >= :startDate', { startDate: start })
+        .andWhere('t.transactionDate <= :endDate', { endDate: end })
+        .groupBy('c.id')
+        .addGroupBy('c.name')
+        .orderBy('SUM(t.amount)', 'DESC')
+        .limit(4)
+        .getRawMany();
+      const topSpendByDebitType = topSpendByDebitTypeRaw.map(
+        (row: { name: string; amount: string }) =>
+          new TopTransactionDto(row.name, parseFloat(row.amount)),
+      );
+
+      const summaryDto = new TransactionSummaryDto();
+      summaryDto.topSpendByCategory = topSpendByCategory;
+      summaryDto.topSpendByCreditType = topSpendByCreditType;
+      summaryDto.topSpendByDebitType = topSpendByDebitType;
+      summaryDto.totalSpend = totalSpend;
+      summaryDto.totalIncome = totalIncome;
+      summaryDto.totalTransactions = totalTransactions;
+
+      return summaryDto;
+    } catch (error) {
+      logger.error(`Error fetching transaction summary for user ${user.id}: ${error.message}`);
+      throw new InternalServerErrorException(
+        `Error fetching transaction summary for user ${user.id}: ${error.message}`,
       );
     }
   }
