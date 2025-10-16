@@ -114,8 +114,9 @@ Transaction
 - GET  /transaction/:id — get specific transaction by ID
 - PUT  /transaction/:id — update transaction fields
 
-Bank Notifications
-- REST endpoints for managing/viewing extracted bank notifications (see src/subscriptions)
+Bank
+- GET  /bank — get all banks
+- GET  /bank/:id — get specific bank by ID
 
 Swagger/OpenAPI is configured via decorators in controllers.
 
