@@ -68,8 +68,11 @@ export class TransactionDto {
     this.description = description;
     this.transactionDate = transactionDate;
     this.category = category;
+    this.categoryId = categoryId;
     this.account = account;
+    this.accountId = accountId;
     this.bank = bank;
+    this.bankId = bankId;
     this.createdAt = createdAt;
   }
 }

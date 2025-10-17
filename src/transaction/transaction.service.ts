@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -88,6 +83,46 @@ export class TransactionService {
         user: { id: user.id },
       };
 
+      // if ordering by converted amount, we need to fetch all matching rows, convert amounts, then sort
+      const orderField = order ? Object.keys(order)[0] : undefined;
+
+      if (orderField === 'amount') {
+        // Fetch all matching transactions so we can convert and sort by converted amount
+        const [allTransactions, total] = await this.transactionRepository.findAndCount({
+          where: where,
+          relations: [
+            'user',
+            'currency',
+            'category',
+            'account',
+            'account.bank',
+            'account.currency',
+          ],
+        });
+
+        const preferredCurrency = user.preferredCurrency || 'USD';
+        const rateCache = new Map<string, number>();
+        const allDtos = await Promise.all(
+          allTransactions.map((transaction) =>
+            this.convertToDto(transaction, preferredCurrency, rateCache),
+          ),
+        );
+
+        // determine direction (ASC or DESC)
+        const dirRaw = order ? Object.values(order)[0] : 'ASC';
+        const dir = String(dirRaw).toLowerCase() === 'asc' ? 'asc' : 'desc';
+
+        allDtos.sort((a, b) => (dir === 'asc' ? a.amount - b.amount : b.amount - a.amount));
+
+        // slice for pagination
+        const paged = allDtos.slice(skip, skip + take);
+        const hasNext = skip + take < total;
+        const hasPrevious = skip > 0;
+
+        return new PaginatedResponseDto(paged, total, page, limit, hasNext, hasPrevious);
+      }
+
+      // default behavior: let the DB do paging and ordering for non-amount fields
       const [transactions, total] = await this.transactionRepository.findAndCount({
         where: where,
         relations: ['user', 'currency', 'category', 'account', 'account.bank', 'account.currency'],
