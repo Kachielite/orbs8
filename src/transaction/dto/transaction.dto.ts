@@ -5,6 +5,9 @@ export class TransactionDto {
   @ApiProperty({ description: 'The id of the transaction', example: 1 })
   id: number;
 
+  @ApiProperty({ description: 'The id of the transaction', example: '1234567890' })
+  transactionId: string;
+
   @ApiProperty({ description: 'The amount of the transaction', example: 100 })
   amount: number;
 
@@ -43,6 +46,7 @@ export class TransactionDto {
 
   constructor(
     id: number,
+    transactionId: string,
     amount: number,
     currency: string,
     type: TransactionType,
@@ -57,6 +61,7 @@ export class TransactionDto {
     createdAt: Date,
   ) {
     this.id = id;
+    this.transactionId = transactionId;
     this.amount = amount;
     this.currency = currency;
     this.type = type;

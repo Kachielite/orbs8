@@ -1,6 +1,5 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
 import { Observable } from 'rxjs';
-import { finalize } from 'rxjs/operators';
 import { Request, Response } from 'express';
 import logger from '../utils/logger/logger';
 
@@ -11,20 +10,40 @@ export class LoggingInterceptor implements NestInterceptor {
     const { method, url } = req;
     const start = Date.now();
 
-    return next.handle().pipe(
-      finalize(() => {
-        const res: Response = context.switchToHttp().getResponse();
-        const { statusCode } = res;
-        const time = Date.now() - start;
+    const res: Response = context.switchToHttp().getResponse();
 
-        logger.info({
-          message: 'Request handled',
-          method,
-          url,
-          statusCode,
-          responseTime: `${time}ms`,
-        });
-      }),
-    );
+    const cleanup = () => {
+      res.removeListener('finish', onFinish);
+      res.removeListener('close', onClose);
+    };
+
+    const logRequest = () => {
+      const { statusCode } = res;
+      const time = Date.now() - start;
+
+      logger.info({
+        message: 'Request handled',
+        method,
+        url,
+        statusCode,
+        responseTime: `${time}ms`,
+      });
+    };
+
+    const onFinish = () => {
+      logRequest();
+      cleanup();
+    };
+
+    const onClose = () => {
+      // closed before finishing (client aborted) — still log
+      logRequest();
+      cleanup();
+    };
+
+    res.on('finish', onFinish);
+    res.on('close', onClose);
+
+    return next.handle();
   }
 }

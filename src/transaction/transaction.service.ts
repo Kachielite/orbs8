@@ -553,6 +553,7 @@ export class TransactionService {
 
     return new TransactionDto(
       transaction.id,
+      transaction.transactionID,
       Number(convertedAmount.toFixed(2)),
       preferredCurrency,
       transaction.type,
@@ -560,7 +561,7 @@ export class TransactionService {
       transaction.transactionDate,
       transaction.category?.name || 'Uncategorized',
       transaction.category?.id || 0,
-      transaction.account?.accountName || '',
+      transaction.account?.accountNumber || '',
       transaction.account?.id || 0,
       transaction.account?.bank?.name || '',
       transaction.account?.bank?.id || 0,
