@@ -17,6 +17,7 @@ import { JwtGuard } from '../auth/guards/jwt.guard';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
+import { TransactionSummaryDto } from './dto/transaction-summary.dto';
 
 @ApiTags('Transaction Management')
 @Controller('transaction')
@@ -66,6 +67,49 @@ export class TransactionController {
     example: 'DESC',
     description: 'Sort direction',
   })
+  @ApiQuery({
+    name: 'categoryIds',
+    required: false,
+    type: Array,
+    description: 'Filter by category ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'accountIds',
+    required: false,
+    type: Array,
+    description: 'Filter by account ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'bankIds',
+    required: false,
+    type: Array,
+    description: 'Filter by bank ids',
+    example: [1, 2, 3],
+  })
+  @ApiQuery({
+    name: 'startDate',
+    required: false,
+    type: String,
+    description: 'Filter by start date (YYYY-MM-DD)',
+    example: '2023-01-01',
+  })
+  @ApiQuery({
+    name: 'endDate',
+    required: false,
+    type: String,
+    description: 'Filter by end date (YYYY-MM-DD)',
+    example: '2023-12-31',
+  })
+  @ApiQuery({
+    name: 'transactionType',
+    required: false,
+    type: String,
+    enum: ['credit', 'debit'],
+    example: 'credit',
+    description: 'Filter by transaction type',
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns a paginated list of transactions',
@@ -99,53 +143,42 @@ export class TransactionController {
     return await this.transactionService.findAll(user, query);
   }
 
-  @Get('/account/:accountId')
+  @Get('summary')
   @ApiOperation({
-    summary: 'Get transactions by account',
+    summary: 'Get transaction summary',
     description:
-      'Returns a paginated list of transactions for the given account belonging to the authenticated user.',
-  })
-  @ApiParam({ name: 'accountId', type: Number, description: 'Account ID', example: 123 })
-  @ApiQuery({
-    name: 'page',
-    required: false,
-    type: Number,
-    description: 'Page number (min 1)',
-    example: 1,
+      'Returns a summary of transactions for the authenticated user, including total spend, total income, total transactions, and top categories by amount.',
   })
   @ApiQuery({
-    name: 'limit',
-    required: false,
-    type: Number,
-    description: 'Items per page (1-100)',
-    example: 10,
-  })
-  @ApiQuery({
-    name: 'search',
-    required: false,
+    name: 'startDate',
+    required: true,
     type: String,
-    description: 'Filter by description or merchant (case-insensitive partial match)',
-    example: 'coffee',
+    description: 'Filter by start date (YYYY-MM-DD)',
+    example: '2023-01-01',
   })
   @ApiQuery({
-    name: 'sort',
-    required: false,
+    name: 'endDate',
+    required: true,
     type: String,
-    description: 'Sort field. Example: amount, date, createdAt',
-    example: 'date',
-  })
-  @ApiQuery({
-    name: 'order',
-    required: false,
-    type: String,
-    enum: ['ASC', 'DESC', 'asc', 'desc'],
-    example: 'DESC',
-    description: 'Sort direction',
+    description: 'Filter by end date (YYYY-MM-DD)',
+    example: '2023-12-31',
   })
   @ApiResponse({
     status: 200,
-    description: 'Returns transactions for the specified account',
-    type: PaginatedResponseDto<TransactionDto>,
+    description: 'Transaction summary retrieved successfully',
+    type: TransactionSummaryDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
   })
   @ApiResponse({
     status: 500,
@@ -156,19 +189,18 @@ export class TransactionController {
         statusCode: { type: 'number', example: 500 },
         message: {
           type: 'string',
-          example: 'Error fetching transactions for user ID: 123: <details>',
+          example: 'Error fetching transaction summary for user 1: <details>',
         },
         error: { type: 'string', example: 'Internal Server Error' },
       },
     },
   })
-  @ApiResponse({ status: 500, description: 'Internal server error' })
-  async findAllByAccount(
-    @Query() query: GetTransactionQuery,
-    @Param('accountId') accountId: string,
+  async getTransactionSummary(
     @CurrentUser() user: Partial<User>,
+    @Query('startDate') startDate: string,
+    @Query('endDate') endDate: string,
   ) {
-    return await this.transactionService.findAllByAccount(+accountId, query, user);
+    return await this.transactionService.getTransactionSummary(user, startDate, endDate);
   }
 
   @Get(':id')

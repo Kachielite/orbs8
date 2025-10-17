@@ -60,7 +60,7 @@ export class CategoryController {
       },
     },
   })
-  async findAll(@Query() query?: string) {
+  async findAll(@Query('query') query?: string) {
     return await this.categoryService.findAll(query);
   }
 

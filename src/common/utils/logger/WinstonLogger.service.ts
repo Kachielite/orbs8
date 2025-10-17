@@ -7,7 +7,9 @@ export class WinstonLogger implements LoggerService {
   }
 
   error(message: any, trace?: string, context?: string) {
-    logger.error(this.formatMessage(message, context) + (trace ? `\n${trace}` : ''));
+    const msg = this.formatMessage(message, context);
+    const traceStr = trace ? `\n${trace}` : '';
+    logger.error(msg + traceStr);
   }
 
   warn(message: any, context?: string) {
@@ -22,7 +24,21 @@ export class WinstonLogger implements LoggerService {
     logger.verbose(this.formatMessage(message, context));
   }
 
+  private safeStringify(msg: any): string {
+    if (msg === undefined) return '';
+    if (msg === null) return 'null';
+    if (typeof msg === 'string') return msg;
+    if (msg instanceof Error) return msg.stack || msg.message || String(msg);
+    try {
+      if (typeof msg === 'object') return JSON.stringify(msg);
+      return String(msg);
+    } catch {
+      return String(msg);
+    }
+  }
+
   private formatMessage(message: any, context?: string): string {
-    return context ? `[${context}] ${message}` : message;
+    const msgStr = this.safeStringify(message);
+    return context ? `[${context}] ${msgStr}` : msgStr;
   }
 }

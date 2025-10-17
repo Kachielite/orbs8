@@ -11,6 +11,7 @@ import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
 import { User } from '../auth/entities/user.entity';
+import { ExchangeRateModule } from '../exchange-rate/exchange-rate.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { User } from '../auth/entities/user.entity';
       Account,
       User,
     ]),
+    ExchangeRateModule,
   ],
   controllers: [TransactionController],
   providers: [TransactionService, OpenAIConfig, CategoryService],

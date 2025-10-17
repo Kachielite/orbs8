@@ -70,8 +70,8 @@ export class EmailWorker extends WorkerHost {
       const messagesRes = await gmail.users.messages.list({
         userId: 'me',
         labelIds: [labelId],
-        q: `newer_than:7d`,
-        maxResults: 10,
+        q: `newer_than:30d`,
+        // maxResults: 10,
       });
 
       const messages = Array.isArray(messagesRes.data.messages)
