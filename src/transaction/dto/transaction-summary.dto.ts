@@ -10,6 +10,14 @@ export class TransactionSummaryDto {
   })
   public topSpendByCategory: TopTransactionDto[];
   @ApiProperty({
+    description: 'The top 6 income categories',
+    example: [
+      { name: 'Salary', amount: 1000, percentage: 80.0 },
+      { name: 'Freelance', amount: 200, percentage: 16.0 },
+    ],
+  })
+  public topIncomeByCategory: TopTransactionDto[];
+  @ApiProperty({
     description: 'The top 6 credit',
     example: [
       { name: 'Salary', amount: 1000, percentage: 80.0 },

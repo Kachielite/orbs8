@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -298,6 +293,17 @@ export class TransactionService {
           return new TopTransactionDto(r.name, amountRounded, percentage);
         });
 
+      // Also expose income grouped by category explicitly
+      const topIncomeByCategory = Array.from(incomeByCategory.values())
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, this.TOP_N)
+        .map((r) => {
+          const amountRounded = Number(r.amount.toFixed(2));
+          const percentage =
+            totalIncome > 0 ? Number(((r.amount / totalIncome) * 100).toFixed(2)) : 0;
+          return new TopTransactionDto(r.name, amountRounded, percentage);
+        });
+
       const topSpendByDebitType = topSpendByCategory; // same as top spend by category for debits
 
       const totalTransactions = await this.transactionRepository.count({
@@ -309,6 +315,7 @@ export class TransactionService {
 
       const summaryDto = new TransactionSummaryDto();
       summaryDto.topSpendByCategory = topSpendByCategory;
+      summaryDto.topIncomeByCategory = topIncomeByCategory;
       summaryDto.topSpendByCreditType = topSpendByCreditType;
       summaryDto.topSpendByDebitType = topSpendByDebitType;
       summaryDto.totalSpend = Number(totalSpend.toFixed(2));
