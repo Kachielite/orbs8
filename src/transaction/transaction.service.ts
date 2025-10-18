@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -27,7 +22,7 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
-import { TopTransactionDto, TransactionSummaryDto } from './dto/transaction-summary.dto';
+import { AccountSummaryDto, TopTransactionDto, TransactionSummaryDto, } from './dto/transaction-summary.dto';
 import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
 
 @Injectable()
@@ -195,6 +190,13 @@ export class TransactionService {
       const end = new Date(endDate);
       const preferredCurrency = user.preferredCurrency || 'USD';
 
+      // Calculate current month and last month dates
+      const now = new Date();
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
       // Fetch all debit transactions in the date range with needed relations
       const debitTxns = await this.transactionRepository.find({
         where: {
@@ -318,6 +320,197 @@ export class TransactionService {
         },
       });
 
+      // Calculate current month spend and income
+      const currentMonthDebitTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.DEBIT,
+          transactionDate: Between(currentMonthStart, currentMonthEnd),
+        },
+        relations: ['currency', 'account', 'account.currency'],
+      });
+
+      let currentMonthSpend = 0;
+      for (const t of currentMonthDebitTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+        currentMonthSpend += converted;
+      }
+
+      const currentMonthCreditTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.CREDIT,
+          transactionDate: Between(currentMonthStart, currentMonthEnd),
+        },
+        relations: ['currency', 'account', 'account.currency'],
+      });
+
+      let currentMonthIncome = 0;
+      for (const t of currentMonthCreditTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+        currentMonthIncome += converted;
+      }
+
+      // Calculate last month spend and income
+      const lastMonthDebitTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.DEBIT,
+          transactionDate: Between(lastMonthStart, lastMonthEnd),
+        },
+        relations: ['currency', 'account', 'account.currency'],
+      });
+
+      let lastMonthSpend = 0;
+      for (const t of lastMonthDebitTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+        lastMonthSpend += converted;
+      }
+
+      const lastMonthCreditTxns = await this.transactionRepository.find({
+        where: {
+          user: { id: user.id },
+          type: TransactionType.CREDIT,
+          transactionDate: Between(lastMonthStart, lastMonthEnd),
+        },
+        relations: ['currency', 'account', 'account.currency'],
+      });
+
+      let lastMonthIncome = 0;
+      for (const t of lastMonthCreditTxns) {
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+        lastMonthIncome += converted;
+      }
+
+      // Account summaries
+      const accountSummariesMap = new Map<
+        number,
+        { accountName: string; totalSpend: number; totalIncome: number; currentBalance: number }
+      >();
+      const allTxns = [...debitTxns, ...creditTxns];
+      for (const t of allTxns) {
+        const accId = t.account?.id;
+        const accName = t.account?.accountName || 'Unknown';
+        const balance = Number(t.account?.currentBalance || 0);
+        if (accId) {
+          const prev = accountSummariesMap.get(accId) ?? {
+            accountName: accName,
+            totalSpend: 0,
+            totalIncome: 0,
+            currentBalance: balance,
+          };
+          const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+          const amount = Number(t.amount);
+          let converted: number;
+          if (txCurrency === preferredCurrency) {
+            converted = amount;
+          } else {
+            const pairKey = `${txCurrency}${preferredCurrency}`;
+            let rate = rateCache.get(pairKey);
+            if (rate === undefined) {
+              rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+              rateCache.set(pairKey, rate);
+            }
+            converted = amount * rate;
+          }
+          if (t.type === TransactionType.DEBIT) {
+            prev.totalSpend += converted;
+          } else {
+            prev.totalIncome += converted;
+          }
+          accountSummariesMap.set(accId, prev);
+        }
+      }
+      const accountSummaries = Array.from(accountSummariesMap.values()).map((acc) => {
+        const accSummary = new AccountSummaryDto();
+        accSummary.accountName = acc.accountName;
+        accSummary.totalSpend = Number(acc.totalSpend.toFixed(2));
+        accSummary.totalIncome = Number(acc.totalIncome.toFixed(2));
+        accSummary.currentBalance = Number(acc.currentBalance.toFixed(2));
+        return accSummary;
+      });
+
+      // Top merchants
+      const merchantsMap = new Map<string, number>();
+      for (const t of debitTxns) {
+        const merchant = t.description;
+        const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+        const amount = Number(t.amount);
+        let converted: number;
+        if (txCurrency === preferredCurrency) {
+          converted = amount;
+        } else {
+          const pairKey = `${txCurrency}${preferredCurrency}`;
+          let rate = rateCache.get(pairKey);
+          if (rate === undefined) {
+            rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+            rateCache.set(pairKey, rate);
+          }
+          converted = amount * rate;
+        }
+        merchantsMap.set(merchant, (merchantsMap.get(merchant) || 0) + converted);
+      }
+      const topMerchants = Array.from(merchantsMap.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, this.TOP_N)
+        .map(([name, amount]) => {
+          const amountRounded = Number(amount.toFixed(2));
+          const percentage = totalSpend > 0 ? Number(((amount / totalSpend) * 100).toFixed(2)) : 0;
+          return new TopTransactionDto(name, amountRounded, percentage);
+        });
+
       const summaryDto = new TransactionSummaryDto();
       summaryDto.topSpendByCategory = topSpendByCategory;
       summaryDto.topIncomeByCategory = topIncomeByCategory;
@@ -326,6 +519,80 @@ export class TransactionService {
       summaryDto.totalSpend = Number(totalSpend.toFixed(2));
       summaryDto.totalIncome = Number(totalIncome.toFixed(2));
       summaryDto.totalTransactions = totalTransactions;
+      summaryDto.currentMonthSpend = Number(currentMonthSpend.toFixed(2));
+      summaryDto.currentMonthIncome = Number(currentMonthIncome.toFixed(2));
+      summaryDto.lastMonthSpend = Number(lastMonthSpend.toFixed(2));
+      summaryDto.lastMonthIncome = Number(lastMonthIncome.toFixed(2));
+      summaryDto.accountSummaries = accountSummaries;
+      summaryDto.topMerchants = topMerchants;
+
+      // Trends for top spend by category
+      const lastMonthSpendByCategory = new Map<number, number>();
+      for (const t of lastMonthDebitTxns) {
+        const catId = t.category?.id;
+        if (catId) {
+          const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+          const amount = Number(t.amount);
+          let converted: number;
+          if (txCurrency === preferredCurrency) {
+            converted = amount;
+          } else {
+            const pairKey = `${txCurrency}${preferredCurrency}`;
+            let rate = rateCache.get(pairKey);
+            if (rate === undefined) {
+              rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+              rateCache.set(pairKey, rate);
+            }
+            converted = amount * rate;
+          }
+          lastMonthSpendByCategory.set(
+            catId,
+            (lastMonthSpendByCategory.get(catId) || 0) + converted,
+          );
+        }
+      }
+      summaryDto.topSpendByCategory = topSpendByCategory.map((cat) => {
+        const catId = Array.from(spendByCategory.keys()).find(
+          (id) => spendByCategory.get(id)?.name === cat.name,
+        );
+        const lastMonthAmount = catId ? lastMonthSpendByCategory.get(catId) || 0 : 0;
+        const trend = cat.amount > lastMonthAmount ? '↑' : cat.amount < lastMonthAmount ? '↓' : '=';
+        return new TopTransactionDto(cat.name, cat.amount, cat.percentage, trend);
+      });
+
+      // Similarly for income categories
+      const lastMonthIncomeByCategory = new Map<number, number>();
+      for (const t of lastMonthCreditTxns) {
+        const catId = t.category?.id;
+        if (catId) {
+          const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
+          const amount = Number(t.amount);
+          let converted: number;
+          if (txCurrency === preferredCurrency) {
+            converted = amount;
+          } else {
+            const pairKey = `${txCurrency}${preferredCurrency}`;
+            let rate = rateCache.get(pairKey);
+            if (rate === undefined) {
+              rate = await this.exchangeRateService.getRate(txCurrency, preferredCurrency);
+              rateCache.set(pairKey, rate);
+            }
+            converted = amount * rate;
+          }
+          lastMonthIncomeByCategory.set(
+            catId,
+            (lastMonthIncomeByCategory.get(catId) || 0) + converted,
+          );
+        }
+      }
+      summaryDto.topIncomeByCategory = topIncomeByCategory.map((cat) => {
+        const catId = Array.from(incomeByCategory.keys()).find(
+          (id) => incomeByCategory.get(id)?.name === cat.name,
+        );
+        const lastMonthAmount = catId ? lastMonthIncomeByCategory.get(catId) || 0 : 0;
+        const trend = cat.amount > lastMonthAmount ? '↑' : cat.amount < lastMonthAmount ? '↓' : '=';
+        return new TopTransactionDto(cat.name, cat.amount, cat.percentage, trend);
+      });
 
       return summaryDto;
     } catch (error) {

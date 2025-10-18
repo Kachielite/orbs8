@@ -48,6 +48,41 @@ export class TransactionSummaryDto {
     example: 10,
   })
   public totalTransactions: number;
+  @ApiProperty({
+    description: 'Current month spend',
+    example: 1500,
+  })
+  public currentMonthSpend: number;
+  @ApiProperty({
+    description: 'Current month income',
+    example: 3000,
+  })
+  public currentMonthIncome: number;
+  @ApiProperty({
+    description: 'Last month spend',
+    example: 1400,
+  })
+  public lastMonthSpend: number;
+  @ApiProperty({
+    description: 'Last month income',
+    example: 2800,
+  })
+  public lastMonthIncome: number;
+  @ApiProperty({
+    description: 'Account-level summaries',
+    example: [
+      { accountName: 'Checking', totalSpend: 500, totalIncome: 2000, currentBalance: 1500 },
+    ],
+  })
+  public accountSummaries: AccountSummaryDto[];
+  @ApiProperty({
+    description: 'Top merchants by spend',
+    example: [
+      { name: 'Amazon', amount: 200, percentage: 20.0 },
+      { name: 'Starbucks', amount: 100, percentage: 10.0 },
+    ],
+  })
+  public topMerchants: TopTransactionDto[];
 }
 
 export class TopTransactionDto {
@@ -57,10 +92,24 @@ export class TopTransactionDto {
   public amount: number;
   @ApiProperty({ description: 'The percentage of total spend/income that this amount represents' })
   public percentage: number;
+  @ApiProperty({ description: 'Trend indicator compared to previous period', example: '↑' })
+  public trend: string;
 
-  constructor(name: string, amount: number, percentage?: number) {
+  constructor(name: string, amount: number, percentage?: number, trend?: string) {
     this.name = name;
     this.amount = amount;
     this.percentage = percentage ?? 0;
+    this.trend = trend ?? '=';
   }
+}
+
+export class AccountSummaryDto {
+  @ApiProperty({ description: 'The name of the account' })
+  public accountName: string;
+  @ApiProperty({ description: 'The total amount spent from this account' })
+  public totalSpend: number;
+  @ApiProperty({ description: 'The total amount earned in this account' })
+  public totalIncome: number;
+  @ApiProperty({ description: 'The current balance of the account' })
+  public currentBalance: number;
 }
