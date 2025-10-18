@@ -41,6 +41,9 @@ export class TransactionService {
     'createdAt',
   ];
 
+  // Number of items to include in "top" lists
+  private readonly TOP_N = 6;
+
   private transactionDetailsSchema: ZodTypeAny = z.object({
     type: z.enum(['Credit', 'Debit']).describe('Transaction type'),
     amount: z.number().describe('Transaction amount'),
@@ -237,8 +240,13 @@ export class TransactionService {
       // Get top spend by category
       const topSpendByCategory = Array.from(spendByCategory.values())
         .sort((a, b) => b.amount - a.amount)
-        .slice(0, 4)
-        .map((r) => new TopTransactionDto(r.name, Number(r.amount.toFixed(2))));
+        .slice(0, this.TOP_N)
+        .map((r) => {
+          const amountRounded = Number(r.amount.toFixed(2));
+          const percentage =
+            totalSpend > 0 ? Number(((r.amount / totalSpend) * 100).toFixed(2)) : 0;
+          return new TopTransactionDto(r.name, amountRounded, percentage);
+        });
 
       // Fetch credit transactions and compute total income similarly
       const creditTxns = await this.transactionRepository.find({
@@ -282,8 +290,13 @@ export class TransactionService {
 
       const topSpendByCreditType = Array.from(incomeByCategory.values())
         .sort((a, b) => b.amount - a.amount)
-        .slice(0, 4)
-        .map((r) => new TopTransactionDto(r.name, Number(r.amount.toFixed(2))));
+        .slice(0, this.TOP_N)
+        .map((r) => {
+          const amountRounded = Number(r.amount.toFixed(2));
+          const percentage =
+            totalIncome > 0 ? Number(((r.amount / totalIncome) * 100).toFixed(2)) : 0;
+          return new TopTransactionDto(r.name, amountRounded, percentage);
+        });
 
       const topSpendByDebitType = topSpendByCategory; // same as top spend by category for debits
 
