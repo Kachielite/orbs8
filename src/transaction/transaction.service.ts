@@ -1,9 +1,4 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -27,11 +22,7 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
-import {
-  AccountSummaryDto,
-  TopTransactionDto,
-  TransactionSummaryDto,
-} from './dto/transaction-summary.dto';
+import { AccountSummaryDto, TopTransactionDto, TransactionSummaryDto, } from './dto/transaction-summary.dto';
 import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
 
 @Injectable()
@@ -199,12 +190,18 @@ export class TransactionService {
       const end = new Date(endDate);
       const preferredCurrency = user.preferredCurrency || 'USD';
 
-      // Calculate current month and last month dates
-      const now = new Date();
-      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-      const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-      const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+      // Calculate current period and last period dates based on the date range passed in
+      // currentMonth = the date range passed in (start to end)
+      // lastMonth = the previous period of the same duration
+      const currentMonthStart = start;
+      const currentMonthEnd = end;
+
+      // Calculate the duration of the current period in milliseconds
+      const periodDuration = end.getTime() - start.getTime();
+
+      // Calculate the previous period (same duration, ending where current period starts)
+      const lastMonthEnd = new Date(start.getTime() - 1); // 1ms before current period starts
+      const lastMonthStart = new Date(start.getTime() - periodDuration);
 
       // Fetch all debit transactions in the date range with needed relations
       const debitTxns = await this.transactionRepository.find({
