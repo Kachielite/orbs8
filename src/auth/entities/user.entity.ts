@@ -1,11 +1,4 @@
-import {
-  Column,
-  CreateDateColumn,
-  Entity,
-  OneToMany,
-  PrimaryGeneratedColumn,
-  UpdateDateColumn,
-} from 'typeorm';
+import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn, } from 'typeorm';
 import { Token } from '../../tokens/entities/token.entity';
 import { Account } from '../../account/entities/account.entity';
 
@@ -40,7 +33,7 @@ export class User {
   @Column({ default: false })
   emailLinked: boolean;
 
-  @Column({ nullable: true, type: 'text', default: 'USD' })
+  @Column({ nullable: true, type: 'text', default: '$' })
   preferredCurrency: string;
 
   @CreateDateColumn()
