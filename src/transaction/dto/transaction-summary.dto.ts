@@ -24,19 +24,6 @@ export class TransactionSummaryDto {
       { name: 'Interest', amount: 50, percentage: 4.0 },
     ],
   })
-  public topSpendByCreditType: TopTransactionDto[];
-  @ApiProperty({
-    description: 'The top 6 debit',
-    example: [
-      { name: 'Rent', amount: 500, percentage: 50.0 },
-      { name: 'Utilities', amount: 50, percentage: 5.0 },
-    ],
-  })
-  public topSpendByDebitType: TopTransactionDto[];
-  @ApiProperty({
-    description: 'The total spend and income',
-    example: 10000,
-  })
   public totalSpend: number;
   @ApiProperty({
     description: 'The total income',
