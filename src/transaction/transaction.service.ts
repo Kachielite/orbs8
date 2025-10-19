@@ -2,7 +2,7 @@ import { ConflictException, Injectable, InternalServerErrorException, NotFoundEx
 import { Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, ILike, In, Repository } from 'typeorm';
+import { Between, FindOptionsOrder, ILike, In, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 import { TransactionDto } from './dto/transaction.dto';
@@ -131,7 +131,7 @@ export class TransactionService {
         relations: ['user', 'currency', 'category', 'account', 'account.bank', 'account.currency'],
         skip,
         take,
-        order,
+        order: order as FindOptionsOrder<Transaction>,
       });
 
       const hasNext = skip + take < total;
