@@ -430,7 +430,7 @@ export class TransactionService {
       const allTxns = [...debitTxns, ...creditTxns];
       for (const t of allTxns) {
         const accId = t.account?.id;
-        const accName = t.account?.accountName || 'Unknown';
+        const accName = t.account?.accountNumber || 'Unknown';
         const balance = Number(t.account?.currentBalance || 0);
         if (accId) {
           const prev = accountSummariesMap.get(accId) ?? {
