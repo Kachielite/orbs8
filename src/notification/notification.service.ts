@@ -140,6 +140,28 @@ export class NotificationService {
     }
   }
 
+  async markAllAsRead(user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Received request to mark all notifications as read for user: ${user.id}`);
+
+      // Use bulk update for better performance and reliability
+      const result = await this.notificationRepository.update(
+        { userId: user.id, isRead: false },
+        { isRead: true },
+      );
+
+      logger.info(`Marked ${result.affected} notifications as read for user: ${user.id}`);
+      return new GeneralResponseDto('All notifications marked as read successfully');
+    } catch (error) {
+      logger.error(
+        `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
+      );
+      throw new InternalServerErrorException(
+        `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
   private convertToDto(notification: Notification): NotificationDto {
     return new NotificationDto(
       notification.id,

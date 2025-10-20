@@ -207,4 +207,45 @@ export class NotificationController {
   async markAsRead(@Param('id') id: string, @CurrentUser() user: Partial<User>) {
     return await this.notificationService.markAsRead(+id, user);
   }
+
+  @Put('/mark-all-as-read')
+  @ApiOperation({
+    summary: 'Mark all notifications as read',
+    description: 'Mark all notifications as read for the authenticated user.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All Notifications marked as read successfully',
+    type: GeneralResponseDto,
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: {
+          type: 'string',
+          example: 'Error marking notifications as read for user: 1: <details>',
+        },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async markAllAsRead(@CurrentUser() user: Partial<User>) {
+    return await this.notificationService.markAllAsRead(user);
+  }
 }
