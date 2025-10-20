@@ -438,13 +438,34 @@ export class TransactionService {
         const accId = t.account?.id;
         const accName = t.account?.accountNumber || 'Unknown';
         const balance = Number(t.account?.currentBalance || 0);
+        const accountCurrency = t.account?.currency?.code || preferredCurrency;
+
         if (accId) {
           const prev = accountSummariesMap.get(accId) ?? {
             accountName: accName,
             totalSpend: 0,
             totalIncome: 0,
-            currentBalance: balance,
+            currentBalance: 0,
           };
+
+          // Convert account balance to preferred currency if not already set
+          if (prev.currentBalance === 0 && balance > 0) {
+            if (accountCurrency === preferredCurrency) {
+              prev.currentBalance = balance;
+            } else {
+              const balancePairKey = `${accountCurrency}${preferredCurrency}`;
+              let balanceRate = rateCache.get(balancePairKey);
+              if (balanceRate === undefined) {
+                balanceRate = await this.exchangeRateService.getRate(
+                  accountCurrency,
+                  preferredCurrency,
+                );
+                rateCache.set(balancePairKey, balanceRate);
+              }
+              prev.currentBalance = balance * balanceRate;
+            }
+          }
+
           const txCurrency = t.account?.currency?.code || t.currency?.code || preferredCurrency;
           const amount = Number(t.amount);
           let converted: number;
