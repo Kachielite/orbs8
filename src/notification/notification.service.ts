@@ -1,10 +1,4 @@
-import {
-  forwardRef,
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { forwardRef, Inject, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
@@ -142,6 +136,7 @@ export class NotificationService {
 
   async markAllAsRead(user: Partial<User>): Promise<GeneralResponseDto> {
     try {
+      console.log('user:', user);
       logger.info(`Received request to mark all notifications as read for user: ${user.id}`);
 
       // Use bulk update for better performance and reliability
@@ -150,12 +145,10 @@ export class NotificationService {
         { isRead: true },
       );
 
-      logger.info(`Marked ${result.affected} notifications as read for user: ${user.id}`);
+      logger.info(`Marked all ${result.affected} notifications as read for user: ${user.id}`);
       return new GeneralResponseDto('All notifications marked as read successfully');
     } catch (error) {
-      logger.error(
-        `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
-      );
+      logger.error(`Error marking all notifications as read for user: ${user.id}: ${error}`);
       throw new InternalServerErrorException(
         `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
       );

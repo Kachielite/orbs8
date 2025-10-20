@@ -12,6 +12,7 @@ import { JobPayloadInterface } from './interface/job-payload.interface';
 import { TransactionService } from '../transaction/transaction.service';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/entities/notification.entity';
+import { OAuth2Client } from 'google-auth-library';
 
 class EmailSyncError extends Error {
   constructor(
@@ -49,7 +50,10 @@ export class EmailWorker extends WorkerHost {
       );
 
       // 1. Find the user entity first to get the correct type for TypeORM
-      const { user, emailEntity } = await this.findUserAndEmail(userId);
+      const { user, emailEntity: initialEmailEntity } = await this.findUserAndEmail(userId);
+
+      // 2. Check if token needs refresh and refresh if necessary
+      const emailEntity = await this.ensureValidToken(initialEmailEntity, userId);
 
       // 3. Set up the Gmail API client with OAuth2
       const oauth2Client = new google.auth.OAuth2(
@@ -60,8 +64,8 @@ export class EmailWorker extends WorkerHost {
       // set credentials
       oauth2Client.setCredentials({
         access_token: emailEntity.accessToken,
-        refresh_token: emailEntity.refreshToken,
-        expiry_date: emailEntity.expiresAt.getTime(),
+        refresh_token: emailEntity.refreshToken ?? undefined,
+        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
       });
       // set scope
       const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -261,6 +265,84 @@ export class EmailWorker extends WorkerHost {
       userDetails.emailEntity.failedReason = job.returnvalue as string;
     }
     await this.emailRepository.save(userDetails.emailEntity);
+  }
+
+  private async ensureValidToken(emailEntity: Email, userId: number): Promise<Email> {
+    try {
+      const now = Date.now();
+      const expiresAtMillis = emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined;
+
+      const isAccessTokenMissing = !emailEntity.accessToken;
+      const isExpired =
+        typeof expiresAtMillis === 'number' ? expiresAtMillis <= now - 60_000 : false;
+      const shouldRefresh = isAccessTokenMissing || isExpired;
+
+      if (shouldRefresh) {
+        if (!emailEntity.refreshToken) {
+          logger.error(`Refresh token missing for user ${userId}`);
+
+          // Mark email entity as needing reconnection
+          emailEntity.syncStatus = EmailSyncStatus.FAILED;
+          emailEntity.failedReason = 'Gmail access expired. Please reconnect your email account.';
+          await this.emailRepository.save(emailEntity);
+
+          throw new BadRequestException(
+            'Gmail access has expired and no refresh token available. Please reconnect your email account.',
+          );
+        }
+
+        logger.info(`Token expired or missing for user ${userId}, refreshing...`);
+        const oauth2Client = new OAuth2Client(
+          envConstants.GOOGLE_CLIENT_ID,
+          envConstants.GOOGLE_CLIENT_SECRET,
+          envConstants.GOOGLE_REDIRECT_URI,
+        );
+
+        oauth2Client.setCredentials({
+          refresh_token: emailEntity.refreshToken,
+        });
+
+        const { credentials } = await oauth2Client.refreshAccessToken();
+
+        // Update email entity with new tokens
+        emailEntity.accessToken = credentials.access_token ?? emailEntity.accessToken;
+        if (credentials.expiry_date) {
+          emailEntity.expiresAt = new Date(credentials.expiry_date);
+        }
+        if (credentials.refresh_token) {
+          emailEntity.refreshToken = credentials.refresh_token;
+        }
+
+        await this.emailRepository.save(emailEntity);
+        logger.info(`✅ Successfully refreshed token for user ${userId}`);
+      } else {
+        logger.info(`Token still valid for user ${userId}`);
+      }
+
+      return emailEntity;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`❌ Failed to ensure valid token for user ${userId}: ${message}`);
+
+      if (message.includes('invalid_grant')) {
+        // Mark email entity as needing reconnection
+        emailEntity.syncStatus = EmailSyncStatus.FAILED;
+        emailEntity.failedReason =
+          'Gmail connection expired or revoked. Please reconnect your email account.';
+        await this.emailRepository.save(emailEntity);
+
+        // Update user's emailLinked status
+        await this.userRepository.update({ id: userId }, { emailLinked: false });
+
+        logger.warn(`⚠️  User ${userId} needs to reconnect their Gmail account`);
+
+        throw new BadRequestException(
+          'Gmail connection expired or revoked. Please reconnect your email account.',
+        );
+      }
+
+      throw new BadRequestException('Failed to refresh Gmail token.');
+    }
   }
 
   private async findUserAndEmail(userId: number): Promise<{ user: User; emailEntity: Email }> {

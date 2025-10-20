@@ -330,14 +330,16 @@ export class CategoryService {
 
         // Tokenize pattern into candidate brand tokens (uppercase words >=3)
         const patternTokens = Array.from(
-          new Set((pattern.toUpperCase().match(/[A-Z0-9]{3,}/g) || []).map((t) => t)),
-        ).filter((t) => !genericStops.has(t));
+          new Set((pattern.toUpperCase().match(/[A-Z0-9]{3,}/g) || []).map((t: string) => t)),
+        ).filter((t: string) => !genericStops.has(t));
 
         // Overlap between text tokens and pattern tokens, excluding generics
         const overlap = new Set(
           textTokens
-            .map((t) => t.replace(/[^A-Z0-9]/g, ''))
-            .filter((t) => t.length >= 3 && !genericStops.has(t) && patternTokens.includes(t)),
+            .map((t: string) => t.replace(/[^A-Z0-9]/g, ''))
+            .filter(
+              (t: string) => t.length >= 3 && !genericStops.has(t) && patternTokens.includes(t),
+            ),
         );
 
         // Scoring components

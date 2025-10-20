@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Put, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
@@ -208,7 +208,7 @@ export class NotificationController {
     return await this.notificationService.markAsRead(+id, user);
   }
 
-  @Put('/mark-all-as-read')
+  @Post('/mark-all-as-read')
   @ApiOperation({
     summary: 'Mark all notifications as read',
     description: 'Mark all notifications as read for the authenticated user.',
