@@ -66,12 +66,19 @@ export class EmailWorker extends WorkerHost {
       const labelId: string = label.id;
       logger.info(`Found label ID ${labelId} for label name ${labelName}`);
 
+      // Check last sync time
+      const lastSyncTime = emailEntity.lastSyncAt;
+      let queryTimeBack = `newer_than:90d`;
+
+      if (lastSyncTime) {
+        queryTimeBack = `after:${lastSyncTime.toISOString()}`;
+      }
+
       // 5. Fetch emails with the subscription label
       const messagesRes = await gmail.users.messages.list({
         userId: 'me',
         labelIds: [labelId],
-        q: `newer_than:30d`,
-        // maxResults: 10,
+        q: queryTimeBack,
       });
 
       const messages = Array.isArray(messagesRes.data.messages)
