@@ -13,6 +13,17 @@ import { TransactionService } from '../transaction/transaction.service';
 import { NotificationService } from '../notification/notification.service';
 import { NotificationType } from '../notification/entities/notification.entity';
 
+class EmailSyncError extends Error {
+  constructor(
+    message: string,
+    public syncedCount: number,
+    public totalEmails: number,
+  ) {
+    super(message);
+    this.name = 'EmailSyncError';
+  }
+}
+
 @Processor('email-sync')
 export class EmailWorker extends WorkerHost {
   constructor(
@@ -27,6 +38,8 @@ export class EmailWorker extends WorkerHost {
   }
 
   async process(job: Job) {
+    let syncedCount = 0;
+    let totalEmails = 0;
     try {
       const userId = (job.data as JobPayloadInterface).userId;
       const labelName = (job.data as JobPayloadInterface).labelName;
@@ -84,6 +97,7 @@ export class EmailWorker extends WorkerHost {
       const messages = Array.isArray(messagesRes.data.messages)
         ? messagesRes.data.messages.reverse()
         : [];
+      totalEmails = messages.length;
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
 
       // 6. Process each email and extract subscription details
@@ -129,6 +143,7 @@ export class EmailWorker extends WorkerHost {
         const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
 
         await this.transactionService.create(user, emailText);
+        syncedCount++;
         const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
@@ -142,10 +157,12 @@ export class EmailWorker extends WorkerHost {
       await this.emailRepository.save(emailEntity);
 
       // 6. Save or process results as needed
-      return results;
+      return { syncedCount, totalEmails, results };
     } catch (e) {
-      logger.error(`Email worker process error: ${e.message}`, e);
-      throw e;
+      const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';
+      logger.error(`Email worker process error: ${errorMessage}`, e);
+      // Return sync stats even on failure
+      throw new EmailSyncError(errorMessage, syncedCount, totalEmails);
     }
   }
 
@@ -182,9 +199,15 @@ export class EmailWorker extends WorkerHost {
     logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
     await this.handleEvents(job, 'completed');
     const userId = (job.data as JobPayloadInterface).userId;
+    const returnValue = job.returnvalue as {
+      syncedCount: number;
+      totalEmails: number;
+      results: any[];
+    };
+    const syncedCount = returnValue?.syncedCount || 0;
     await this.notificationService.createAndEmit(
       'Email sync completed',
-      `Completed syncing emails from your Gmail account.`,
+      `Successfully synced ${syncedCount} emails from your Gmail account.`,
       NotificationType.SYNC_COMPLETED,
       userId,
     );
@@ -195,9 +218,26 @@ export class EmailWorker extends WorkerHost {
     logger.error(`Job ${job.id} failed with error ${err.message}`);
     await this.handleEvents(job, 'failed');
     const userId = (job.data as JobPayloadInterface).userId;
+
+    // Extract sync stats from the error if it's an EmailSyncError
+    let syncedCount = 0;
+    let totalEmails = 0;
+
+    if (err instanceof EmailSyncError) {
+      syncedCount = err.syncedCount;
+      totalEmails = err.totalEmails;
+    }
+
+    const failedCount = totalEmails - syncedCount;
+
+    let message = 'Failed to sync emails from your Gmail account.';
+    if (totalEmails > 0) {
+      message = `Synced ${syncedCount} out of ${totalEmails} emails. ${failedCount} email(s) failed to sync.`;
+    }
+
     await this.notificationService.createAndEmit(
       'Email sync failed',
-      'Failed to sync emails from your Gmail account.',
+      message,
       NotificationType.SYNC_FAILED,
       userId,
     );
