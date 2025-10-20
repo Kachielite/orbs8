@@ -10,6 +10,7 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class EmailService {
@@ -259,7 +260,7 @@ export class EmailService {
     }
   }
 
-  // @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_HOUR)
   async scheduledSync() {
     logger.info('Scheduled sync started');
     const users = await this.userRepository.find();
