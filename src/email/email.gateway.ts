@@ -72,7 +72,7 @@ export class EmailGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleInit(socket: Socket) {
     const userId = socket.data.userId as string;
     const notifications = await this.notificationRepository.find({
-      where: { userId: parseInt(userId, 10) },
+      where: { userId: parseInt(userId, 10), isRead: false },
       order: { createdAt: 'DESC' },
       take: 20,
     });
