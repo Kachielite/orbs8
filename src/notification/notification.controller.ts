@@ -1,12 +1,20 @@
-import { Controller, Get, Param, Put, UseGuards } from '@nestjs/common';
+import { Controller, Get, Param, Put, Query, UseGuards } from '@nestjs/common';
 import { NotificationService } from './notification.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { NotificationDto } from './dto/notification.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
-import { NotificationsResponseDto } from './dto/notifications-response.dto';
+import { type NotificationQuery } from './notification.interface';
+import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
 
 @ApiTags('Notification Management')
 @ApiBearerAuth()
@@ -20,10 +28,49 @@ export class NotificationController {
     summary: 'Get all notifications',
     description: 'Returns a list of all notifications for the authenticated user.',
   })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (min 1)',
+    example: 1,
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Items per page (1-100)',
+    example: 10,
+  })
+  @ApiQuery({
+    name: 'isRead',
+    required: false,
+    type: Boolean,
+    description: 'Filter notifications by read status',
+    example: true,
+  })
   @ApiResponse({
     status: 200,
     description: 'Returns a list of notifications',
-    type: NotificationsResponseDto,
+    type: PaginatedResponseDto,
+    example: {
+      data: [
+        {
+          id: 1,
+          userId: 1,
+          title: 'New Transaction',
+          message: 'You have received a new transaction',
+          type: 'SYNC_STARTED',
+          isRead: false,
+          date: '2023-01-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 10,
+      hasNext: false,
+      hasPrev: false,
+    },
   })
   @ApiResponse({
     status: 401,
@@ -49,8 +96,8 @@ export class NotificationController {
       },
     },
   })
-  async findAll(@CurrentUser() user: Partial<User>) {
-    return await this.notificationService.findAll(user);
+  async findAll(@Query() query: NotificationQuery, @CurrentUser() user: Partial<User>) {
+    return await this.notificationService.findAll(user, query);
   }
 
   @Get(':id')

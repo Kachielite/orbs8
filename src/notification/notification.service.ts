@@ -12,8 +12,9 @@ import { User } from '../auth/entities/user.entity';
 import logger from '../common/utils/logger/logger';
 import { NotificationDto } from './dto/notification.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
-import { NotificationsResponseDto } from './dto/notifications-response.dto';
 import { EmailGateway } from '../email/email.gateway';
+import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { NotificationQuery } from './notification.interface';
 
 @Injectable()
 export class NotificationService {
@@ -58,17 +59,28 @@ export class NotificationService {
     }
   }
 
-  async findAll(user: Partial<User>): Promise<NotificationsResponseDto> {
+  async findAll(
+    user: Partial<User>,
+    query: NotificationQuery,
+  ): Promise<PaginatedResponseDto<NotificationDto>> {
     try {
       logger.info(`Fetching notifications for user: ${user.id}`);
-      const notifications = await this.notificationRepository.find({
-        where: { userId: user.id },
+      const { page, limit, isRead } = query;
+
+      const [notifications, total] = await this.notificationRepository.findAndCount({
+        where: { userId: user.id, ...(isRead !== undefined ? { isRead } : {}) },
+        order: { createdAt: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
       });
+
+      const hasNext = total > (page - 1) * limit + notifications.length;
+      const hasPrevious = page > 1;
 
       const notificationDtos = notifications.map((notification: Notification) =>
         this.convertToDto(notification),
       );
-      return new NotificationsResponseDto(notificationDtos, notificationDtos.length);
+      return new PaginatedResponseDto(notificationDtos, total, page, limit, hasNext, hasPrevious);
     } catch (error) {
       logger.error(`Error fetching notifications: ${error.message}`);
       throw new InternalServerErrorException(`Error fetching notifications: ${error.message}`);
