@@ -211,7 +211,9 @@ export class EmailWorker extends WorkerHost {
     const syncedCount = returnValue?.syncedCount || 0;
     await this.notificationService.createAndEmit(
       'Email sync completed',
-      `Successfully synced ${syncedCount} emails from your Gmail account.`,
+      syncedCount === 0
+        ? `No new emails to synced from your Gmail account. Transactions are up to date.`
+        : `Successfully synced ${syncedCount} emails from your Gmail account.`,
       NotificationType.SYNC_COMPLETED,
       userId,
     );
