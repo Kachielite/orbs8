@@ -174,104 +174,107 @@ export class EmailWorker extends WorkerHost {
   async onActive(job: Job) {
     logger.info(`Job ${job.id} is active`);
     await this.handleEvents(job, 'active');
-    const userId = (job.data as JobPayloadInterface).userId;
-    await this.notificationService.createAndEmit(
-      'Email sync started',
-      `Started syncing emails from your Gmail account.`,
-      NotificationType.SYNC_STARTED,
-      userId,
-    );
   }
 
   @OnWorkerEvent('progress')
   async onProgress(job: Job, progress: number) {
     logger.info(`Job ${job.id} progress: ${progress}% complete`);
     await this.handleEvents(job, 'progress');
-    const userId = (job.data as JobPayloadInterface).userId;
-    await this.notificationService.createAndEmit(
-      'Email sync in progress',
-      `Progress: ${progress}% complete.`,
-      NotificationType.SYNC_PROGRESS,
-      userId,
-      true,
-      progress,
-    );
   }
 
   @OnWorkerEvent('completed')
   async onCompleted(job: Job) {
     logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
     await this.handleEvents(job, 'completed');
-    const userId = (job.data as JobPayloadInterface).userId;
-    const returnValue = job.returnvalue as {
-      syncedCount: number;
-      totalEmails: number;
-      results: unknown[];
-    };
-    const syncedCount = returnValue?.syncedCount || 0;
-
-    //
-
-    await this.notificationService.createAndEmit(
-      'Email sync completed',
-      syncedCount === 0
-        ? `No new emails to synced from your Gmail account. Transactions are up to date.`
-        : `Successfully synced ${syncedCount} emails from your Gmail account.`,
-      NotificationType.SYNC_COMPLETED,
-      userId,
-    );
   }
 
   @OnWorkerEvent('failed')
   async onFailed(job: Job, err: Error) {
     logger.error(`Job ${job.id} failed with error ${err.message}`);
     await this.handleEvents(job, 'failed');
-    const userId = (job.data as JobPayloadInterface).userId;
-
-    // Extract sync stats from the error if it's an EmailSyncError
-    let syncedCount = 0;
-    let totalEmails = 0;
-
-    if (err instanceof EmailSyncError) {
-      syncedCount = err.syncedCount;
-      totalEmails = err.totalEmails;
-    }
-
-    const failedCount = totalEmails - syncedCount;
-
-    let message = 'Failed to sync emails from your Gmail account.';
-    if (totalEmails > 0) {
-      message = `Synced ${syncedCount} out of ${totalEmails} emails. ${failedCount} email(s) failed to sync.`;
-    }
-
-    await this.notificationService.createAndEmit(
-      'Email sync failed',
-      message,
-      NotificationType.SYNC_FAILED,
-      userId,
-    );
   }
 
   private async handleEvents(job: Job, type: 'active' | 'progress' | 'completed' | 'failed') {
     const userId = (job.data as JobPayloadInterface).userId;
     const userDetails = await this.findUserAndEmail(userId);
+
     if (type === 'active') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.PENDING;
       userDetails.emailEntity.failedReason = null;
+      await this.emailRepository.save(userDetails.emailEntity);
+
+      await this.notificationService.createAndEmit(
+        'Email sync started',
+        `Started syncing emails from your Gmail account.`,
+        NotificationType.SYNC_STARTED,
+        userId,
+      );
     } else if (type === 'progress') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;
       userDetails.emailEntity.failedReason = null;
+      await this.emailRepository.save(userDetails.emailEntity);
+
+      const progress = job.progress as number;
+      await this.notificationService.createAndEmit(
+        'Email sync in progress',
+        `Progress: ${progress}% complete.`,
+        NotificationType.SYNC_PROGRESS,
+        userId,
+        true,
+        progress,
+      );
     } else if (type === 'completed') {
       logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
       userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
       userDetails.emailEntity.lastSyncAt = new Date();
       userDetails.emailEntity.failedReason = null;
+      await this.emailRepository.save(userDetails.emailEntity);
+
+      const returnValue = job.returnvalue as {
+        syncedCount: number;
+        totalEmails: number;
+        results: unknown[];
+      };
+      const syncedCount = returnValue?.syncedCount || 0;
+
+      await this.notificationService.createAndEmit(
+        'Email sync completed',
+        syncedCount === 0
+          ? `No new emails to synced from your Gmail account. Transactions are up to date.`
+          : `Successfully synced ${syncedCount} emails from your Gmail account.`,
+        NotificationType.SYNC_COMPLETED,
+        userId,
+      );
     } else if (type === 'failed') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
       userDetails.emailEntity.failedReason = job.returnvalue as string;
       userDetails.emailEntity.lastSyncAt = new Date();
+      await this.emailRepository.save(userDetails.emailEntity);
+
+      // Extract sync stats from the error if it's an EmailSyncError
+      let syncedCount = 0;
+      let totalEmails = 0;
+      const failedError = job.failedReason;
+
+      if (failedError && failedError.includes('EmailSyncError')) {
+        const returnValue = job.returnvalue as { syncedCount?: number; totalEmails?: number };
+        syncedCount = returnValue?.syncedCount || 0;
+        totalEmails = returnValue?.totalEmails || 0;
+      }
+
+      const failedCount = totalEmails - syncedCount;
+      let message = 'Failed to sync emails from your Gmail account.';
+      if (totalEmails > 0) {
+        message = `Synced ${syncedCount} out of ${totalEmails} emails. ${failedCount} email(s) failed to sync.`;
+      }
+
+      await this.notificationService.createAndEmit(
+        'Email sync failed',
+        message,
+        NotificationType.SYNC_FAILED,
+        userId,
+      );
     }
-    await this.emailRepository.save(userDetails.emailEntity);
   }
 
   private async ensureValidToken(emailEntity: Email, userId: number): Promise<Email> {

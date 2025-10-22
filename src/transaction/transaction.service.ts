@@ -683,7 +683,7 @@ export class TransactionService {
       // Find bank
       let bankEntity: Bank | null;
       const bank = await this.bankRepository.findOne({
-        where: { name: bankName },
+        where: { name: ILike(bankName) },
       });
       if (!bank) {
         const newBank = this.bankRepository.create({ name: bankName });
