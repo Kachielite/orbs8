@@ -695,7 +695,7 @@ export class TransactionService {
       // Find Account
       let accountEntity: Account | null;
       const account = await this.accountRepository.findOne({
-        where: { accountNumber, accountName, user: { id: user.id } },
+        where: { accountNumber, user: { id: user.id } },
       });
       if (!account) {
         const newAccount = this.accountRepository.create({
