@@ -98,49 +98,56 @@ export class EmailWorker extends WorkerHost {
         q: queryTimeBack,
       });
 
-      const messages = Array.isArray(messagesRes.data.messages)
-        ? messagesRes.data.messages.reverse()
-        : [];
+      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages : [];
       totalEmails = messages.length;
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
+
+      // Fetch full message details and sort by internalDate to ensure chronological order (oldest first)
+      const fullMessages: Array<{ id: string; internalDate: string; msg: any }> = [];
+      for (const m of messages) {
+        if (!m.id) continue;
+        const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
+        const msg = msgRes.data;
+        fullMessages.push({ id: m.id, internalDate: msg.internalDate || '0', msg });
+      }
+
+      // Sort messages by internalDate ascending (oldest first)
+      fullMessages.sort((a, b) => parseInt(a.internalDate) - parseInt(b.internalDate));
 
       // 6. Process each email and extract subscription details
       const results: Array<Record<string, unknown>> = [];
       logger.info(
-        `Extracting subscription details from ${messages.length} emails for user ${user.id}`,
+        `Extracting subscription details from ${fullMessages.length} emails for user ${user.id}`,
       );
 
-      const jobProgress = messages.length;
+      const jobProgress = fullMessages.length;
 
-      for (const m of messages) {
-        if (!m.id) continue;
-        // Fetch the full message details using the `get` method
-        const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
-        const msg = msgRes.data;
+      for (const item of fullMessages) {
+        const msg = item.msg; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
         // Extract only subject and body to save tokens
-        const headers = msg.payload?.headers || [];
-        const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+        const headers = msg.payload?.headers || []; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+        const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || ''; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
 
         // Extract body from the message payload
         let bodyRaw = '';
         if (msg.payload?.body?.data) {
           // Decode base64url encoded body
-          bodyRaw = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8');
+          bodyRaw = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
         } else if (msg.payload?.parts) {
           // If message has parts, look for text/plain or text/html
           for (const part of msg.payload.parts) {
             if (part.mimeType === 'text/plain' && part.body?.data) {
-              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
               break;
             } else if (part.mimeType === 'text/html' && part.body?.data && !bodyRaw) {
-              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
             }
           }
         }
 
         // Normalize whitespace: trim and replace multiple spaces/newlines with single space
-        const subject = subjectRaw.trim().replace(/\s+/g, ' ');
+        const subject = subjectRaw.trim().replace(/\s+/g, ' '); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
         const body = bodyRaw.trim().replace(/\s+/g, ' ');
 
         // Create a minimal email text with just subject and body
@@ -148,7 +155,7 @@ export class EmailWorker extends WorkerHost {
 
         await this.transactionService.create(user, emailText);
         syncedCount++;
-        const progress = Math.round(((messages.indexOf(m) + 1) / jobProgress) * 100);
+        const progress = Math.round(((fullMessages.indexOf(item) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
       logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
@@ -199,7 +206,7 @@ export class EmailWorker extends WorkerHost {
     const returnValue = job.returnvalue as {
       syncedCount: number;
       totalEmails: number;
-      results: any[];
+      results: unknown[];
     };
     const syncedCount = returnValue?.syncedCount || 0;
 
