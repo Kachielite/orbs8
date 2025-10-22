@@ -153,13 +153,6 @@ export class EmailWorker extends WorkerHost {
       }
       logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
 
-      // 7. update last sync and email received
-      logger.info(`Updating last sync and email received for user ${user.id}`);
-      emailEntity.lastSyncAt = new Date();
-      emailEntity.emailsReceived = messages.length;
-      emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
-      await this.emailRepository.save(emailEntity);
-
       // 6. Save or process results as needed
       return { syncedCount, totalEmails, results };
     } catch (e) {
@@ -209,6 +202,9 @@ export class EmailWorker extends WorkerHost {
       results: any[];
     };
     const syncedCount = returnValue?.syncedCount || 0;
+
+    //
+
     await this.notificationService.createAndEmit(
       'Email sync completed',
       syncedCount === 0
@@ -261,10 +257,12 @@ export class EmailWorker extends WorkerHost {
     } else if (type === 'completed') {
       logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
       userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
+      userDetails.emailEntity.lastSyncAt = new Date();
       userDetails.emailEntity.failedReason = null;
     } else if (type === 'failed') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
       userDetails.emailEntity.failedReason = job.returnvalue as string;
+      userDetails.emailEntity.lastSyncAt = new Date();
     }
     await this.emailRepository.save(userDetails.emailEntity);
   }
