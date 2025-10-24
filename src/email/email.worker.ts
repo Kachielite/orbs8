@@ -222,7 +222,7 @@ export class EmailWorker extends WorkerHost {
     const userDetails = await this.findUserAndEmail(userId);
 
     if (type === 'active') {
-      userDetails.emailEntity.syncStatus = EmailSyncStatus.PENDING;
+      userDetails.emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;
       userDetails.emailEntity.failedReason = null;
       await this.emailRepository.save(userDetails.emailEntity);
 

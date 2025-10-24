@@ -2,7 +2,14 @@ import { Controller, Delete, Get, Param, Post, Put, Query, UseGuards } from '@ne
 import { NotificationService } from './notification.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { User } from '../auth/entities/user.entity';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { JwtGuard } from '../auth/guards/jwt.guard';
 import { NotificationDto } from './dto/notification.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
