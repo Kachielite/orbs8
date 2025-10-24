@@ -303,7 +303,7 @@ export class NotificationController {
     return await this.notificationService.delete(+id, user);
   }
 
-  @Delete('/all')
+  @Delete()
   @ApiOperation({
     summary: 'Delete all notifications',
     description: 'Delete all notifications for the authenticated user.',
