@@ -1,10 +1,4 @@
-import {
-  forwardRef,
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
+import { forwardRef, Inject, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification, NotificationType } from './entities/notification.entity';
@@ -158,6 +152,42 @@ export class NotificationService {
       logger.error(`Error marking all notifications as read for user: ${user.id}: ${error}`);
       throw new InternalServerErrorException(
         `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
+  async delete(id: number, user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Received request to delete notification with ID: ${id} for user: ${user.id}`);
+      const notification = await this.notificationRepository.findOne({
+        where: { id, userId: user.id },
+      });
+      if (!notification) {
+        throw new NotFoundException(`Notification with ID ${id} not found for user ${user.id}`);
+      }
+      await this.notificationRepository.remove(notification);
+      return new GeneralResponseDto('Notification deleted successfully');
+    } catch (error) {
+      logger.error(`Error deleting notification with ID: ${id} for user: ${user.id}: ${error}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Error deleting notification with ID: ${id} for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
+  async deleteAll(user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Received request to delete all notifications for user: ${user.id}`);
+      const result = await this.notificationRepository.delete({ userId: user.id });
+      logger.info(`Deleted ${result.affected} notifications for user: ${user.id}`);
+      return new GeneralResponseDto('All notifications deleted successfully');
+    } catch (error) {
+      logger.error(`Error deleting all notifications for user: ${user.id}: ${error}`);
+      throw new InternalServerErrorException(
+        `Error deleting all notifications for user: ${user.id}: ${error.message}`,
       );
     }
   }
