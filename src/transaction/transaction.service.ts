@@ -625,7 +625,11 @@ export class TransactionService {
     }
   }
 
-  async create(user: Partial<User>, emailText: string): Promise<GeneralResponseDto> {
+  async create(
+    user: Partial<User>,
+    emailText: string,
+    options?: { fallbackDate?: Date },
+  ): Promise<GeneralResponseDto> {
     try {
       logger.info(`Creating transaction for user: ${user.id}`);
       // Extract transaction details from the email
@@ -643,22 +647,24 @@ export class TransactionService {
         bankName,
       } = transactionDetails;
 
+      // Determine a safe transaction date (prefer parsed, else fallback, else now)
+      const determineDate = (): Date => {
+        const candidates: Array<string | Date | undefined> = [date, options?.fallbackDate];
+        for (const c of candidates) {
+          if (!c) continue;
+          const d = c instanceof Date ? c : new Date(c);
+          if (!Number.isNaN(d.getTime())) return d;
+        }
+        return new Date();
+      };
+      const safeDate = determineDate();
+
       // Find user
       const requestOwner = await this.userRepository.findOne({ where: { id: user.id } });
       if (!requestOwner) throw new NotFoundException(`User with ID ${user.id} not found`);
 
-      // find existing transaction
-      const tranID = transactionId || new Date(date).toISOString();
-      const existingTransaction = await this.transactionRepository.findOne({
-        where: {
-          transactionID: tranID,
-          user: { id: user.id },
-          account: { accountName: accountName, accountNumber: accountNumber },
-        },
-      });
-      if (existingTransaction) {
-        return new GeneralResponseDto('Transaction already exists, skipping creation');
-      }
+      // Normalize a safe transaction id (use provided transactionId or safe date)
+      const tranID = transactionId || safeDate.toISOString();
 
       // Find currency from pre-populated list (search by both code and name)
       const currencySearch = currency?.toUpperCase() || 'USD';
@@ -680,7 +686,7 @@ export class TransactionService {
         }
       }
 
-      // Find bank
+      // Find or create bank
       let bankEntity: Bank | null;
       const bank = await this.bankRepository.findOne({
         where: { name: ILike(bankName) },
@@ -692,12 +698,12 @@ export class TransactionService {
         bankEntity = bank;
       }
 
-      // Find Account
-      let accountEntity: Account | null;
-      const account = await this.accountRepository.findOne({
+      // Find or create Account first so we can always update balance
+      let accountEntity: Account | null = await this.accountRepository.findOne({
         where: { accountNumber, user: { id: user.id } },
+        relations: ['currency', 'bank', 'user'],
       });
-      if (!account) {
+      if (!accountEntity) {
         const newAccount = this.accountRepository.create({
           accountName,
           accountNumber,
@@ -708,7 +714,34 @@ export class TransactionService {
         });
         accountEntity = await this.accountRepository.save(newAccount);
       } else {
-        accountEntity = account;
+        // Update balance (and optionally account name/bank) every time we parse an email
+        if (Number.isFinite(currentBalance)) {
+          accountEntity.currentBalance = currentBalance;
+        }
+        // Keep account metadata fresh if provided
+        if (accountName && accountName !== accountEntity.accountName) {
+          accountEntity.accountName = accountName;
+        }
+        if (bankEntity && (!accountEntity.bank || accountEntity.bank.id !== bankEntity.id)) {
+          accountEntity.bank = bankEntity;
+        }
+        // Persist changes
+        await this.accountRepository.save(accountEntity);
+      }
+
+      // If a transaction already exists, still ensure account balance is up to date and then exit
+      const existingTransaction = await this.transactionRepository.findOne({
+        where: {
+          transactionID: tranID,
+          user: { id: user.id },
+          account: { accountName: accountName, accountNumber: accountNumber },
+        },
+      });
+      if (existingTransaction) {
+        // Balance already updated above when fetching/creating the account
+        return new GeneralResponseDto(
+          'Transaction already exists, skipping creation (balance updated)',
+        );
       }
 
       // Find category
@@ -724,7 +757,7 @@ export class TransactionService {
           TransactionType[type.toUpperCase() as keyof typeof TransactionType] ||
           TransactionType.OTHER,
         description,
-        transactionDate: new Date(date),
+        transactionDate: safeDate,
         transactionID: tranID,
         user: requestOwner,
         category: categoryEntity!,

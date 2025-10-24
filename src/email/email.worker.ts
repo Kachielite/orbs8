@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Email, EmailSyncStatus } from './entities/email.entity';
 import { User } from '../auth/entities/user.entity';
-import { google } from 'googleapis';
+import { gmail_v1, google } from 'googleapis';
 import { envConstants } from '../common/constants/env.secrets';
 import logger from '../common/utils/logger/logger';
 import { BadRequestException } from '@nestjs/common';
@@ -88,22 +88,41 @@ export class EmailWorker extends WorkerHost {
       let queryTimeBack = `newer_than:90d`;
 
       if (lastSyncTime) {
-        queryTimeBack = `after:${lastSyncTime.toISOString()}`;
+        // Gmail expects 'after:' in YYYY/MM/DD format (per search grammar). Use UTC date to avoid TZ issues.
+        const year = lastSyncTime.getUTCFullYear();
+        const month = String(lastSyncTime.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(lastSyncTime.getUTCDate()).padStart(2, '0');
+        const afterDate = `${year}/${month}/${day}`;
+        queryTimeBack = `after:${afterDate}`;
       }
 
-      // 5. Fetch emails with the subscription label
-      const messagesRes = await gmail.users.messages.list({
-        userId: 'me',
-        labelIds: [labelId],
-        q: queryTimeBack,
-      });
+      // 5. Fetch emails with the subscription label (with pagination)
+      let pageToken: string | undefined = undefined;
+      const messages: gmail_v1.Schema$Message[] = [];
+      do {
+        const messagesRes = await gmail.users.messages.list({
+          userId: 'me',
+          labelIds: [labelId],
+          q: queryTimeBack,
+          pageToken,
+          maxResults: 500, // grab as many as allowed per page to reduce round-trips
+        });
+        const pageMessages: gmail_v1.Schema$Message[] = Array.isArray(messagesRes.data.messages)
+          ? (messagesRes.data.messages as gmail_v1.Schema$Message[])
+          : [];
+        messages.push(...pageMessages);
+        pageToken = messagesRes.data.nextPageToken || undefined;
+      } while (pageToken);
 
-      const messages = Array.isArray(messagesRes.data.messages) ? messagesRes.data.messages : [];
       totalEmails = messages.length;
       logger.info(`Found ${messages.length} emails with label ID ${labelId} for user ${user.id}`);
 
       // Fetch full message details and sort by internalDate to ensure chronological order (oldest first)
-      const fullMessages: Array<{ id: string; internalDate: string; msg: any }> = [];
+      const fullMessages: Array<{
+        id: string;
+        internalDate: string;
+        msg: gmail_v1.Schema$Message;
+      }> = [];
       for (const m of messages) {
         if (!m.id) continue;
         const msgRes = await gmail.users.messages.get({ userId: 'me', id: m.id });
@@ -123,42 +142,46 @@ export class EmailWorker extends WorkerHost {
       const jobProgress = fullMessages.length;
 
       for (const item of fullMessages) {
-        const msg = item.msg; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+        const msg = item.msg;
 
         // Extract only subject and body to save tokens
-        const headers = msg.payload?.headers || []; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
-        const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || ''; // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+        const headers = msg.payload?.headers || [];
+        const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
 
         // Extract body from the message payload
         let bodyRaw = '';
         if (msg.payload?.body?.data) {
           // Decode base64url encoded body
-          bodyRaw = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
+          bodyRaw = Buffer.from(msg.payload.body.data, 'base64url').toString('utf-8');
         } else if (msg.payload?.parts) {
           // If message has parts, look for text/plain or text/html
           for (const part of msg.payload.parts) {
             if (part.mimeType === 'text/plain' && part.body?.data) {
-              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
               break;
             } else if (part.mimeType === 'text/html' && part.body?.data && !bodyRaw) {
-              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8'); // eslint-disable-line @typescript-eslint/no-unsafe-argument
+              bodyRaw = Buffer.from(part.body.data, 'base64url').toString('utf-8');
             }
           }
         }
 
         // Normalize whitespace: trim and replace multiple spaces/newlines with single space
-        const subject = subjectRaw.trim().replace(/\s+/g, ' '); // eslint-disable-line @typescript-eslint/no-unsafe-assignment
+        const subject = subjectRaw.trim().replace(/\s+/g, ' ');
         const body = bodyRaw.trim().replace(/\s+/g, ' ');
 
         // Create a minimal email text with just subject and body
         const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
 
-        await this.transactionService.create(user, emailText);
+        // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
+        const internalMs = parseInt(item.internalDate, 10);
+        const fallbackDate = Number.isFinite(internalMs) ? new Date(internalMs) : undefined;
+
+        await this.transactionService.create(user, emailText, { fallbackDate });
         syncedCount++;
         const progress = Math.round(((fullMessages.indexOf(item) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
-      logger.info(`Extracted ${results.length} subscription details for user ${user.id}`);
+      logger.info(`Processed ${syncedCount}/${fullMessages.length} emails for user ${user.id}`);
 
       // 6. Save or process results as needed
       return { syncedCount, totalEmails, results };
