@@ -114,6 +114,30 @@ export class TransactionController {
     status: 200,
     description: 'Returns a paginated list of transactions',
     type: PaginatedResponseDto<TransactionDto>,
+    example: {
+      data: [
+        {
+          id: 1,
+          transactionId: 'TSJF138832',
+          amount: 100,
+          currency: 'USD',
+          type: 'CREDIT',
+          description: 'Coffee',
+          transactionDate: '2023-01-01T00:00:00Z',
+          category: 'Groceries',
+          categoryId: 1,
+          account: '16******45',
+          bank: 'Bank of Wakanda',
+          bankId: 1,
+          createdAt: '2023-01-01T00:00:00Z',
+        },
+      ],
+      total: 1,
+      page: 1,
+      limit: 10,
+      hasNext: false,
+      hasPrev: false,
+    },
   })
   @ApiResponse({
     status: 401,

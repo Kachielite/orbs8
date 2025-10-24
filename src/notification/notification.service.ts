@@ -12,8 +12,9 @@ import { User } from '../auth/entities/user.entity';
 import logger from '../common/utils/logger/logger';
 import { NotificationDto } from './dto/notification.dto';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
-import { NotificationsResponseDto } from './dto/notifications-response.dto';
 import { EmailGateway } from '../email/email.gateway';
+import { PaginatedResponseDto } from '../common/dto/paginated-response.dto';
+import { NotificationQuery } from './notification.interface';
 
 @Injectable()
 export class NotificationService {
@@ -39,6 +40,7 @@ export class NotificationService {
         description,
         type,
         userId,
+        createdAt: new Date(),
       });
 
       if (!emitOnly) {
@@ -58,17 +60,28 @@ export class NotificationService {
     }
   }
 
-  async findAll(user: Partial<User>): Promise<NotificationsResponseDto> {
+  async findAll(
+    user: Partial<User>,
+    query: NotificationQuery,
+  ): Promise<PaginatedResponseDto<NotificationDto>> {
     try {
       logger.info(`Fetching notifications for user: ${user.id}`);
-      const notifications = await this.notificationRepository.find({
-        where: { userId: user.id },
+      const { page, limit, isRead } = query;
+
+      const [notifications, total] = await this.notificationRepository.findAndCount({
+        where: { userId: user.id, ...(isRead !== undefined ? { isRead } : {}) },
+        order: { createdAt: 'DESC' },
+        skip: (page - 1) * limit,
+        take: limit,
       });
+
+      const hasNext = total > (page - 1) * limit + notifications.length;
+      const hasPrevious = page > 1;
 
       const notificationDtos = notifications.map((notification: Notification) =>
         this.convertToDto(notification),
       );
-      return new NotificationsResponseDto(notificationDtos, notificationDtos.length);
+      return new PaginatedResponseDto(notificationDtos, total, page, limit, hasNext, hasPrevious);
     } catch (error) {
       logger.error(`Error fetching notifications: ${error.message}`);
       throw new InternalServerErrorException(`Error fetching notifications: ${error.message}`);
@@ -124,6 +137,63 @@ export class NotificationService {
       }
       throw new InternalServerErrorException(
         `Error marking notification with ID: ${id} as read for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
+  async markAllAsRead(user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      console.log('user:', user);
+      logger.info(`Received request to mark all notifications as read for user: ${user.id}`);
+
+      // Use bulk update for better performance and reliability
+      const result = await this.notificationRepository.update(
+        { userId: user.id, isRead: false },
+        { isRead: true },
+      );
+
+      logger.info(`Marked all ${result.affected} notifications as read for user: ${user.id}`);
+      return new GeneralResponseDto('All notifications marked as read successfully');
+    } catch (error) {
+      logger.error(`Error marking all notifications as read for user: ${user.id}: ${error}`);
+      throw new InternalServerErrorException(
+        `Error marking all notifications as read for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
+  async delete(id: number, user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Received request to delete notification with ID: ${id} for user: ${user.id}`);
+      const notification = await this.notificationRepository.findOne({
+        where: { id, userId: user.id },
+      });
+      if (!notification) {
+        throw new NotFoundException(`Notification with ID ${id} not found for user ${user.id}`);
+      }
+      await this.notificationRepository.remove(notification);
+      return new GeneralResponseDto('Notification deleted successfully');
+    } catch (error) {
+      logger.error(`Error deleting notification with ID: ${id} for user: ${user.id}: ${error}`);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException(
+        `Error deleting notification with ID: ${id} for user: ${user.id}: ${error.message}`,
+      );
+    }
+  }
+
+  async deleteAll(user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Received request to delete all notifications for user: ${user.id}`);
+      const result = await this.notificationRepository.delete({ userId: user.id });
+      logger.info(`Deleted ${result.affected} notifications for user: ${user.id}`);
+      return new GeneralResponseDto('All notifications deleted successfully');
+    } catch (error) {
+      logger.error(`Error deleting all notifications for user: ${user.id}: ${error}`);
+      throw new InternalServerErrorException(
+        `Error deleting all notifications for user: ${user.id}: ${error.message}`,
       );
     }
   }

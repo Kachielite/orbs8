@@ -17,6 +17,7 @@ import { CategoryService } from '../category/category.service';
 import { EmailGateway } from './email.gateway';
 import { Notification } from '../notification/entities/notification.entity';
 import { NotificationModule } from '../notification/notification.module';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { NotificationModule } from '../notification/notification.module';
     TransactionModule,
     BullModule.registerQueue({ name: 'email-sync' }),
     forwardRef(() => NotificationModule),
+    ScheduleModule.forRoot(),
   ],
   controllers: [EmailController],
   providers: [EmailService, EmailWorker, OpenAIConfig, CategoryService, EmailGateway],

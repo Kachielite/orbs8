@@ -10,6 +10,7 @@ import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
 import { StatusDto } from './dto/status.dto';
 import { InjectQueue } from '@nestjs/bullmq';
+import { Cron, CronExpression } from '@nestjs/schedule';
 
 @Injectable()
 export class EmailService {
@@ -53,12 +54,9 @@ export class EmailService {
       logger.info('Obtaining Gmail access');
       const accessData = await this.oauth2Client.getToken(code);
 
-      if (
-        !accessData.tokens.refresh_token &&
-        !accessData.tokens.access_token &&
-        !accessData.tokens.expiry_date
-      ) {
-        throw new BadRequestException('Failed to obtain access token');
+      // Validate that we got at least an access token
+      if (!accessData.tokens.access_token) {
+        throw new BadRequestException('Failed to obtain access token from Google');
       }
 
       // Check if email tokens already exist for the user
@@ -74,26 +72,48 @@ export class EmailService {
         : null;
 
       if (existingEmail) {
-        // update access and refresh token
-        this.emailRepository.merge(existingEmail, {
-          lastSyncAt: new Date(),
-          accessToken: accessData.tokens.access_token!,
-          refreshToken: accessData.tokens.refresh_token,
-          expiresAt: expiresAtValue!,
-        });
+        // Update access token and expiry date
+        existingEmail.accessToken = accessData.tokens.access_token;
+        existingEmail.expiresAt = expiresAtValue!;
+        existingEmail.lastSyncAt = new Date();
+
+        // Only update refresh token if Google provided a new one
+        // Otherwise, keep the existing refresh token
+        if (accessData.tokens.refresh_token) {
+          existingEmail.refreshToken = accessData.tokens.refresh_token;
+          logger.info(`New refresh token provided for user ${user.id}`);
+        } else {
+          logger.info(`Reusing existing refresh token for user ${user.id}`);
+        }
+
+        // Reset sync status and clear any previous failure reason
+        existingEmail.syncStatus = EmailSyncStatus.IDLE;
+        existingEmail.failedReason = null;
+
+        await this.emailRepository.save(existingEmail);
+        logger.info(`✅ Gmail access updated successfully for user ${user.id}`);
+
+        // Update user's emailLinked status
+        await this.userRepository.update({ id: user.id }, { emailLinked: true });
 
         return new GeneralResponseDto('Gmail access updated successfully');
       }
 
+      // Create new email access record
       const newEmailAccess = this.emailRepository.create({
         user: { id: user.id } as User,
         provider: EmailProvider.GMAIL,
         accessToken: accessData.tokens.access_token,
         refreshToken: accessData.tokens.refresh_token,
         expiresAt: expiresAtValue,
+        syncStatus: EmailSyncStatus.IDLE,
       } as DeepPartial<Email>);
 
       await this.emailRepository.save(newEmailAccess);
+      logger.info(`✅ Gmail access obtained successfully for user ${user.id}`);
+
+      // Update user's emailLinked status
+      await this.userRepository.update({ id: user.id }, { emailLinked: true });
 
       return new GeneralResponseDto('Gmail access obtained successfully');
     } catch (error) {
@@ -135,20 +155,18 @@ export class EmailService {
       // Set syncStatus to PENDING before queuing the job
       await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
       // get label name
-      const emailEntity = await this.emailRepository.find({
+      const emailEntity = await this.emailRepository.findOne({
         where: { user: { id: user.id } as User },
         relations: ['user'],
       });
 
-      const labelName = emailEntity[0]?.labelName;
+      const labelName = emailEntity?.labelName;
 
       if (!labelName) {
         throw new BadRequestException('Email label not set. Please verify label access first.');
       }
 
-      // refresh email token
-      await this.refreshGmailAccessToken(user.id, emailEntity[0]);
-
+      // Worker will handle token refresh automatically
       // Add job to the queue
       await this.emailSyncQueue.add('sync-emails', {
         userId: user.id,
@@ -242,17 +260,17 @@ export class EmailService {
     }
   }
 
-  // @Cron(CronExpression.EVERY_HOUR)
+  @Cron(CronExpression.EVERY_HOUR)
   async scheduledSync() {
     logger.info('Scheduled sync started');
     const users = await this.userRepository.find();
     for (const user of users) {
       try {
-        // Get labelName
-        const labelName = await this.emailRepository.findOne({
+        const emailEntity = await this.emailRepository.findOne({
           where: { user: { id: user.id } as User },
           relations: ['user'],
         });
+        const labelName = emailEntity?.labelName;
         // Set syncStatus to PENDING before queuing the job
         await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
         await this.emailSyncQueue.add('sync-emails', { userId: user.id, labelName });

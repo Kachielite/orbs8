@@ -98,6 +98,9 @@ Notification
 - GET  /notification — get all notifications for authenticated user
 - GET  /notification/:id — get specific notification by ID
 - PUT  /notification/:id — mark notification as read
+- POST /notification/mark-all-as-read — mark all notifications as read
+- DELETE /notification/:id — delete specific notification by ID
+- DELETE /notification — delete all read notifications
 
 Account
 - GET  /account — get all accounts for authenticated user
