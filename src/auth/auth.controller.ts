@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, Put, Query, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtGuard } from './guards/jwt.guard';
 import { CurrentUser } from './decorators/current-user.decorator';
@@ -11,15 +11,9 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
-import {
-  ApiBearerAuth,
-  ApiBody,
-  ApiOperation,
-  ApiQuery,
-  ApiResponse,
-  ApiTags,
-} from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
 import { VerifyPasswordTokenDto } from './dto/verify-password-token.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -505,5 +499,94 @@ export class AuthController {
   @Post('/verify-token')
   async verifyToken(@Body() request: VerifyPasswordTokenDto) {
     return this.authService.verifyPasswordResetToken(request);
+  }
+
+  @ApiOperation({
+    summary: 'Update user profile',
+    description:
+      "Updates the current user's profile information including name, preferred currency, and password.",
+  })
+  @ApiBody({
+    description: 'User update payload',
+    type: UpdateUserDto,
+    examples: {
+      example: {
+        summary: 'Example',
+        value: {
+          name: 'Jane Doe',
+          preferredCurrency: 'USD',
+          newPassword: 'newPassword123',
+          oldPassword: 'oldPassword123',
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User updated successfully',
+    type: GeneralResponseDto,
+    schema: {
+      example: {
+        message: 'User updated successfully',
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Invalid input data',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['Name must be a string', 'Currency code must be a string'],
+        },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 403,
+    description: 'Forbidden - Password related errors',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 403 },
+        message: { type: 'string', example: 'Old password is incorrect' },
+        error: { type: 'string', example: 'Forbidden' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Not Found - User or currency not found',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 404 },
+        message: { type: 'string', example: 'Currency with code XXX not found' },
+        error: { type: 'string', example: 'Not Found' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal Server Error',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'An error occurred while updating user' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  @ApiBearerAuth()
+  @UseGuards(JwtGuard)
+  @Put()
+  async updateUser(@Body() request: UpdateUserDto, @CurrentUser() user: UserResponseDto) {
+    return this.authService.updateUser(request, user);
   }
 }
