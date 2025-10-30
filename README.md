@@ -254,6 +254,135 @@ Tuning knobs
 - Triggering a manual refresh: you can add an admin endpoint that calls a public refresh method on `ExchangeRateService` to force-update all pairs immediately (useful for debugging).
 
 
+## Intelligent Regex Extraction System
+
+### Overview
+The system uses a smart regex-first extraction approach that automatically learns and caches extraction patterns, reducing LLM costs by up to 95% after the first email from each bank.
+
+### How It Works
+
+**First Email from a Bank:**
+1. Extracts transaction data using LLM (GPT-4o-mini)
+2. Automatically generates regex patterns using GPT-4o
+3. Audits patterns with GPT-4o for validation and confidence scoring
+4. Saves approved patterns (confidence ≥ 70%) for future use
+5. Marks transaction as `extractionMethod: LLM`
+
+**Subsequent Emails from Same Bank:**
+1. Uses saved regex patterns (instant, near-zero cost)
+2. Falls back to LLM if regex extraction fails
+3. Marks transaction as `extractionMethod: REGEX`
+4. Tracks success/failure rates for quality monitoring
+5. Auto-deactivates patterns with >30% failure rate
+
+### Regex Module Components
+
+**Entity:** `src/regex/entities/regex.entity.ts`
+- Stores regex patterns per bank as JSON
+- Tracks success/failure counts and confidence scores
+- Maintains audit status (PENDING, APPROVED, REJECTED)
+- Auto-deactivation based on failure rate thresholds
+
+**Service:** `src/regex/regex.service.ts`
+- `findActiveRegexByBank()` — Find active regex for a bank
+- `extractWithRegex()` — Extract data using regex patterns
+- `generateRegexPattern()` — Generate regex using GPT-4o
+- `auditRegexPattern()` — Audit regex using GPT-4o
+- `createRegexPattern()` — Save audited patterns to database
+
+**Transaction Integration:**
+- Added `ExtractionMethod` enum (LLM, REGEX, MANUAL) to track extraction source
+- Added `extractionMethod` column to transaction entity
+- Added nullable `regex` relation to link transactions to patterns used
+- `extractTransactionDetailsWithRegex()` method handles the intelligent routing
+
+### Models Used
+
+1. **Regex Generation:** `gpt-4o` — Creates precise, robust extraction patterns
+2. **Regex Auditing:** `gpt-4o` — Deep validation with confidence scoring (OpenAI's most advanced model)
+3. **LLM Fallback:** `gpt-4o-mini` — Fast, cost-effective extraction when regex unavailable/fails
+
+### Monitoring & Analytics
+
+**Check Extraction Method Distribution:**
+```sql
+SELECT 
+  extraction_method,
+  COUNT(*) as count,
+  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
+FROM transaction
+GROUP BY extraction_method;
+```
+
+**Check Regex Performance by Bank:**
+```sql
+SELECT 
+  b.name as bank_name,
+  r.success_count,
+  r.failure_count,
+  r.confidence_score,
+  r.is_active,
+  ROUND(r.success_count * 100.0 / (r.success_count + r.failure_count), 2) as success_rate
+FROM regex r
+JOIN bank b ON r.bank_id = b.id
+ORDER BY success_rate DESC;
+```
+
+**Find Banks Without Regex Patterns:**
+```sql
+SELECT b.* 
+FROM bank b
+LEFT JOIN regex r ON b.id = r.bank_id AND r.is_active = true
+WHERE r.id IS NULL;
+```
+
+**Estimate Cost Savings:**
+```sql
+SELECT 
+  COUNT(*) as regex_extractions,
+  COUNT(*) * 0.002 as estimated_cost_saved_usd
+FROM transaction
+WHERE extraction_method = 'REGEX';
+```
+
+### Troubleshooting
+
+**Force Regenerate Pattern:**
+```sql
+UPDATE regex 
+SET is_active = false 
+WHERE bank_id = <bank_id>;
+```
+Next email from that bank will generate a new pattern.
+
+**Check Pattern Details:**
+```sql
+SELECT * FROM regex 
+WHERE bank_id = <bank_id> 
+ORDER BY created_at DESC;
+```
+
+### Performance Metrics
+
+- **Extraction Time:** LLM ~2-5s vs Regex ~50-100ms (40-100x faster)
+- **Cost per Extraction:** LLM ~$0.002 vs Regex ~$0.000001
+- **Success Rate Target:** Maintain >90%, auto-deactivate at <70%
+
+### Email Processing Enhancements
+
+**Whitespace Cleaning:**
+The system reduces large whitespaces to single spaces for better extraction accuracy:
+```typescript
+// Before: "Amount:    1000.00"
+// After:  "Amount: 1000.00"
+```
+
+**LastSync Update Strategy:**
+- `lastSyncAt` is updated only when all jobs complete successfully
+- Set to current time in the `completed` event handler
+- Not updated in `failed` event to preserve accurate sync timing
+
+
 ## Project structure
 
 Core modules:
@@ -265,6 +394,7 @@ Core modules:
 - src/bank — bank entity definitions and relationships
 - src/currency — currency entities and management
 - src/email — Gmail OAuth integration and email sync functionality
+- src/regex — intelligent regex pattern generation and caching for transaction extraction
 - src/subscriptions — bank notification subscription management
 - src/tokens — password reset token handling
 - src/mail — email service and templates

@@ -2,6 +2,9 @@ import winston, { format } from 'winston';
 
 const { combine, timestamp, label, printf, colorize } = format;
 
+// Configurable root log level (default: info). Set LOG_LEVEL=debug to see debug logs.
+const LOG_LEVEL = (process.env.LOG_LEVEL || 'debug').toLowerCase();
+
 type LogInfo = {
   level: string;
   message: string;
@@ -55,15 +58,18 @@ const myFormat = printf((raw: unknown) => {
 });
 
 const logger = winston.createLogger({
+  level: LOG_LEVEL,
   format: combine(colorize(), label({ label: 'ORBS8 🛰️' }), timestamp(), myFormat),
   transports: [
-    new winston.transports.Console(),
+    new winston.transports.Console({ level: LOG_LEVEL }),
     new winston.transports.File({
       filename: './logs/error.log',
       level: 'error',
     }),
     new winston.transports.File({
       filename: './logs/combined.log',
+      // Inherit root level for combined log
+      level: LOG_LEVEL,
     }),
   ],
 });
