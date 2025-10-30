@@ -85,7 +85,7 @@ export class EmailWorker extends WorkerHost {
 
       // Check last sync time
       const lastSyncTime = emailEntity.lastSyncAt;
-      let queryTimeBack = `newer_than:90d`;
+      let queryTimeBack = `newer_than:30d`;
 
       if (lastSyncTime) {
         // Gmail expects 'after:' in YYYY/MM/DD format (per search grammar). Use UTC date to avoid TZ issues.
@@ -165,12 +165,12 @@ export class EmailWorker extends WorkerHost {
           }
         }
 
-        // Normalize whitespace: trim and replace multiple spaces/newlines with single space
-        const subject = subjectRaw.trim().replace(/\s+/g, ' ');
-        const body = bodyRaw.trim().replace(/\s+/g, ' ');
+        // Sanitize subject and body: remove HTML, URLs, footer/signatures, fwd/reply headers, and normalize whitespace
+        const cleanSubject = this.sanitizeSubject(subjectRaw);
+        const cleanBody = this.sanitizeEmailBody(bodyRaw);
 
         // Create a minimal email text with just subject and body
-        const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
+        const emailText = `Subject: ${cleanSubject}\n\nBody:\n${cleanBody}`;
 
         // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
         const internalMs = parseInt(item.internalDate, 10);
@@ -178,6 +178,12 @@ export class EmailWorker extends WorkerHost {
 
         await this.transactionService.create(user, emailText, { fallbackDate });
         syncedCount++;
+
+        // Update lastSyncAt to the time of this email
+        const { emailEntity: currentEmailEntity } = await this.findUserAndEmail(userId);
+        currentEmailEntity.lastSyncAt = fallbackDate || new Date();
+        await this.emailRepository.save(currentEmailEntity);
+
         const progress = Math.round(((fullMessages.indexOf(item) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
@@ -249,7 +255,6 @@ export class EmailWorker extends WorkerHost {
     } else if (type === 'completed') {
       logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
       userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
-      userDetails.emailEntity.lastSyncAt = new Date();
       userDetails.emailEntity.failedReason = null;
       await this.emailRepository.save(userDetails.emailEntity);
 
@@ -271,7 +276,6 @@ export class EmailWorker extends WorkerHost {
     } else if (type === 'failed') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
       userDetails.emailEntity.failedReason = job.returnvalue as string;
-      userDetails.emailEntity.lastSyncAt = new Date();
       await this.emailRepository.save(userDetails.emailEntity);
 
       // Extract sync stats from the error if it's an EmailSyncError
@@ -395,5 +399,129 @@ export class EmailWorker extends WorkerHost {
       throw new BadRequestException(`Email credentials not found for user ${userId}`);
     }
     return { user, emailEntity };
+  }
+
+  // --- Sanitization helpers ---
+  private sanitizeSubject(input: string): string {
+    return this.normalizeWhitespace(this.stripUrls(this.stripHtml(input)));
+  }
+
+  private sanitizeEmailBody(raw: string): string {
+    // 1) convert HTML -> text
+    let text = this.stripHtml(raw);
+    // 2) remove URLs
+    text = this.stripUrls(text);
+    // 3) remove forwarded/replied headers embedded in body
+    text = this.removeForwardHeaders(text);
+    // 4) remove email signatures/footers
+    text = this.stripFootersAndSignatures(text);
+    // 5) normalize whitespace
+    text = this.normalizeWhitespace(text);
+    return text;
+  }
+
+  private stripHtml(input: string): string {
+    if (!input) return '';
+    let s = input;
+    // remove script/style blocks
+    s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    // replace <br> and closing block tags with newlines to retain structure
+    s = s.replace(/<(br|br\s*\/|\/p|\/div|\/li)\s*\/?>/gi, '\n');
+    // turn list items into lines
+    s = s.replace(/<li[^>]*>/gi, '- ');
+    // strip remaining tags
+    s = s.replace(/<[^>]+>/g, ' ');
+    // decode a few common HTML entities
+    s = s
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+    return s;
+  }
+
+  private stripUrls(input: string): string {
+    if (!input) return '';
+    // remove http/https, www, and mailto links
+    return input.replace(/\b(?:https?:\/\/|www\.)\S+|\bmailto:\S+/gi, ' ');
+  }
+
+  private removeForwardHeaders(input: string): string {
+    if (!input) return '';
+    const headerNames = [
+      'from',
+      'to',
+      'cc',
+      'bcc',
+      'date',
+      'subject',
+      'sent',
+      'mailed-by',
+      'reply-to',
+      'message-id',
+      'content-type',
+      'received',
+      'dkim-signature',
+    ];
+    const headerRe = new RegExp(String.raw`^\s*(?:>+\s*)?(?:${headerNames.join('|')})\s*:`, 'i');
+    const lines = input.split(/\r?\n/);
+
+    // Remove obvious forward separators blocks and header lines
+    const filtered = lines.filter((line) => {
+      const isForwardSep =
+        /^\s*-{2,}\s*forwarded message\s*-{2,}\s*$/i.test(line) ||
+        /^\s*begin forwarded message\s*:?\s*$/i.test(line) ||
+        /^\s*on .+ wrote:\s*$/i.test(line);
+      if (isForwardSep) return false;
+      return !headerRe.test(line);
+    });
+
+    return filtered.join('\n');
+  }
+
+  private stripFootersAndSignatures(input: string): string {
+    if (!input) return '';
+    const lines = input.split(/\r?\n/);
+
+    // Common signature/footer markers
+    const markers: RegExp[] = [
+      /^\s*--\s*$/, // signature delimiter
+      /^\s*sent from my /i,
+      /^\s*best( regards)?\s*[,.-]*\s*$/i,
+      /^\s*regards\s*[,.-]*\s*$/i,
+      /^\s*kind regards\s*[,.-]*\s*$/i,
+      /^\s*thanks( a lot| so much)?\s*[,.-]*\s*$/i,
+      /^\s*thank you\s*[,.-]*\s*$/i,
+      /^\s*cheers\s*[,.-]*\s*$/i,
+      /^\s*sincerely\s*[,.-]*\s*$/i,
+      /^\s*yours (faithfully|truly)\s*[,.-]*\s*$/i,
+      /^\s*this email (and any attachments )?is confidential/i,
+      /^\s*do not reply/i,
+      /^\s*unsubscribe\b/i,
+    ];
+
+    // Walk from bottom and cut at the first marker found
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (markers.some((re) => re.test(line))) {
+        return lines.slice(0, i).join('\n');
+      }
+    }
+
+    return input;
+  }
+
+  private normalizeWhitespace(input: string): string {
+    if (!input) return '';
+    return input
+      .replace(/\r/g, '\n')
+      .replace(/\t/g, ' ')
+      .replace(/[ \u00A0]+/g, ' ') // collapse spaces and non-breaking spaces
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/ {2,}/g, ' ') // reduce multiple spaces to single space
+      .trim();
   }
 }

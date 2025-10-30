@@ -11,7 +11,14 @@ import { UserResponseDto } from './dto/user-response.dto';
 import { GoogleLoginDto } from './dto/google-login.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import { VerifyPasswordTokenDto } from './dto/verify-password-token.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 
