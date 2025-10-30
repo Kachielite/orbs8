@@ -255,6 +255,7 @@ export class EmailWorker extends WorkerHost {
     } else if (type === 'completed') {
       logger.info(`Job ${job.id} completed with result ${JSON.stringify(job.returnvalue)}`);
       userDetails.emailEntity.syncStatus = EmailSyncStatus.COMPLETED;
+      userDetails.emailEntity.lastSyncAt = new Date();
       userDetails.emailEntity.failedReason = null;
       await this.emailRepository.save(userDetails.emailEntity);
 
