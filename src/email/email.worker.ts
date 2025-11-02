@@ -169,8 +169,12 @@ export class EmailWorker extends WorkerHost {
         const cleanSubject = this.sanitizeSubject(subjectRaw);
         const cleanBody = this.sanitizeEmailBody(bodyRaw);
 
-        // Create a minimal email text with just subject and body
-        const emailText = `Subject: ${cleanSubject}\n\nBody:\n${cleanBody}`;
+        // Create a minimal, single-line email text with subject and body back-to-back
+        const parts: string[] = [];
+        if (cleanSubject) parts.push(`Subject: ${cleanSubject}`);
+        if (cleanBody) parts.push(`Body: ${cleanBody}`);
+        const emailText = parts.join(' ');
+        console.log("emailText:", emailText)
 
         // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
         const internalMs = parseInt(item.internalDate, 10);
@@ -517,12 +521,9 @@ export class EmailWorker extends WorkerHost {
 
   private normalizeWhitespace(input: string): string {
     if (!input) return '';
+    // Collapse all whitespace (including newlines and tabs) into single spaces and return one line
     return input
-      .replace(/\r/g, '\n')
-      .replace(/\t/g, ' ')
-      .replace(/[ \u00A0]+/g, ' ') // collapse spaces and non-breaking spaces
-      .replace(/\n{3,}/g, '\n\n')
-      .replace(/ {2,}/g, ' ') // reduce multiple spaces to single space
+      .replace(/\s+/g, ' ')
       .trim();
   }
 }
