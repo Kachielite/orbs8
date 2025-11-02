@@ -42,7 +42,7 @@ export class RegexService {
 
     const extractedData = await this.extractWithLLM(emailText);
 
-    const generatedPattern = await this.generateRegexPattern(emailText, extractedData, bank.id);
+    const generatedPattern = await this.generateRegexPattern(emailText, extractedData);
     const auditResult = await this.auditRegexPattern(emailText, generatedPattern, extractedData);
     const newRegex = await this.createRegexPattern(bank.id, generatedPattern, auditResult);
 
@@ -58,7 +58,7 @@ export class RegexService {
     return this.regexRepository.findOne({
       where: { bank: { id: bankId }, isActive: true, auditStatus: RegexAuditStatus.APPROVED },
       relations: ['bank'],
-      order: { successCount: 'DESC' },
+      order: { isActive: 'DESC', confidenceScore: 'DESC', successCount: 'DESC', updatedAt: 'DESC' },
     });
   }
 
@@ -74,8 +74,8 @@ export class RegexService {
 
       const extracted: Record<string, unknown> = {};
       const text = this.normalizeText(emailText);
-      // All fields required for successful regex extraction
-      const OPTIONAL_FIELDS = new Set<string>();
+      // Treat all fields as optional during the per-field loop; we'll decide requiredness after.
+      const OPTIONAL_FIELDS = new Set<string>(Object.keys(regex.pattern || {}));
       let extractionFailed = false;
       const fieldStatuses: Array<{
         field: string;
@@ -145,17 +145,45 @@ export class RegexService {
       // Log a concise summary (no raw values)
       const totalFields = fieldStatuses.length;
       const matchedFields = fieldStatuses.filter((s) => s.matched).map((s) => s.field);
-      const missingRequired = fieldStatuses
-        .filter((s) => !s.matched && !OPTIONAL_FIELDS.has(s.field))
-        .map((s) => s.field);
       const missingOptional = fieldStatuses
         .filter((s) => !s.matched && OPTIONAL_FIELDS.has(s.field))
         .map((s) => s.field);
       const withBadCaptures = fieldStatuses.filter((s) => s.captureCount !== 1).map((s) => s.field);
 
-      if (missingRequired.length > 0) {
+      // Determine presence of core groups required for a "successful" extraction
+      const hasAny = (obj: Record<string, unknown>, keys: string[]) =>
+        keys.some((k) => typeof obj[k] === 'string' ? String(obj[k]).trim().length > 0 : obj[k] != null);
+      const amountKeys = ['amount', 'transaction_amount', 'credit_amount', 'debit_amount'];
+      const refKeys = [
+        'reference_number',
+        'transaction_reference',
+        'reference',
+        'transactionId',
+        'transaction_id',
+      ];
+      const dateKeys = [
+        'transaction_date',
+        'transaction_date_time',
+        'value_date',
+        'date',
+        'value_date_time',
+      ];
+
+      const hasAmount = hasAny(extracted, amountKeys);
+      const hasRef = hasAny(extracted, refKeys);
+      const hasDate = hasAny(extracted, dateKeys);
+
+      const missingRequired: string[] = [];
+      if (!hasAmount) missingRequired.push('amount');
+      if (!hasRef) missingRequired.push('reference_number');
+      if (!hasDate) missingRequired.push('transaction_date');
+
+      // Decide failure based on core missing
+      extractionFailed = missingRequired.length > 0;
+
+      if (extractionFailed) {
         this.logger.warn(
-          `Regex extraction summary (ID=${regex.id}, bank=${regex.bank.name}): matched ${matchedFields.length}/${totalFields}. Missing required: ${missingRequired.join(', ')}${
+          `Regex extraction summary (ID=${regex.id}, bank=${regex.bank.name}): matched ${matchedFields.length}/${totalFields}. Missing required core fields: ${missingRequired.join(', ')}${
             missingOptional.length ? ` | Missing optional: ${missingOptional.join(', ')}` : ''
           }`,
         );
@@ -182,17 +210,43 @@ export class RegexService {
         );
       }
 
-      // update success/failure metrics
+      // update success/failure metrics + audit status
+      const now = new Date();
+      regex.lastUsedAt = now;
+
       if (extractionFailed) {
         regex.failureCount += 1;
+        // Demote to REJECTED with concise notes
+        regex.auditStatus = RegexAuditStatus.REJECTED;
+        const nonSingle = withBadCaptures.length ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}` : '';
+        regex.auditNotes = `Missing required core: ${missingRequired.join(', ')} | matched ${matchedFields.length}/${totalFields}${missingOptional.length ? ` | missingOptional: ${missingOptional.join(', ')}` : ''}${nonSingle}`;
       } else {
         regex.successCount += 1;
+        // Promote to APPROVED on any full success; keep active
+        regex.auditStatus = RegexAuditStatus.APPROVED;
+        regex.isActive = true;
+        const nonSingle = withBadCaptures.length ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}` : '';
+        regex.auditNotes = `Promoted to APPROVED after successful extraction | matched ${matchedFields.length}/${totalFields}${missingOptional.length ? ` | missingOptional: ${missingOptional.join(', ')}` : ''}${nonSingle}`;
       }
-      regex.lastUsedAt = new Date();
-      if (regex.failureCount + regex.successCount > 10) {
-        const rate = regex.failureCount / (regex.successCount + regex.failureCount);
-        if (rate > 0.3) regex.isActive = false;
+
+      // Auto-deactivate only after a minimum number of trials
+      const totalAttempts = regex.failureCount + regex.successCount;
+      if (totalAttempts >= 5) {
+        const failureRate = regex.failureCount / totalAttempts;
+        if (failureRate > 0.3) regex.isActive = false;
       }
+
+      // Update confidenceScore based on smoothed live success ratio, blended with initial audit score
+      const liveScore = Math.round((100 * (regex.successCount + 1)) / (totalAttempts + 2)); // Laplace smoothing
+      const prior = Number(regex.confidenceScore) || 0;
+      let blended = liveScore;
+      if (totalAttempts >= 3) {
+        blended = Math.round(0.7 * liveScore + 0.3 * prior);
+      } else {
+        blended = Math.round(0.5 * liveScore + 0.5 * prior);
+      }
+      regex.confidenceScore = Math.max(0, Math.min(100, blended));
+
       await this.regexRepository.save(regex);
 
       if (extractionFailed) {
@@ -214,17 +268,16 @@ export class RegexService {
   async generateRegexPattern(
     emailText: string,
     extractedData: unknown,
-    bankId: number,
   ): Promise<Record<string, string>> {
-    // Expect a record of string patterns
+    // Expect a record of string patterns; LLM is fully responsible for which fields to include
     const schema = z.record(z.string(), z.string());
 
     const prompt = ChatPromptTemplate.fromMessages([
       [
         'system',
-        'You generate JavaScript regex patterns for extracting transaction data from bank notifications. Return only valid JSON object mapping field -> regex string. Each field must have exactly one capturing group. If unsure, set the value to an empty string. Do NOT include markdown.',
+        'You generate JavaScript regex patterns for extracting transaction data from bank notifications. Return only a valid JSON object mapping field -> regex string. Each field must have exactly one capturing group. If a field cannot be reliably matched, omit it. Do NOT include markdown.',
       ],
-      ['user', 'Email:\n{emailText}\n\nExtracted Data:\n{extractedData}'],
+      ['user', 'Email:\n{emailText}\n\nExtracted Data (reference):\n{extractedData}'],
     ]);
 
     const chain = prompt.pipe(this.openAI.getLLM());
@@ -236,7 +289,7 @@ export class RegexService {
       });
     } catch (e) {
       this.logger.warn(`LLM generateRegexPattern error: ${(e as Error).message}`);
-      return this.autoFixPatterns({});
+      return {};
     }
 
     const text = (raw as { content?: unknown }).content;
@@ -255,9 +308,11 @@ export class RegexService {
       result = parsed.data;
     }
 
-    const fixed = this.autoFixPatterns(result);
-    const bank = await this.bankRepository.findOne({ where: { id: bankId } });
-    if (bank?.name) fixed.bankName = `(${this.escapeRegExp(bank.name)})`;
+    // Ensure patterns use a single capturing group when applied
+    const fixed: Record<string, string> = {};
+    for (const [k, v] of Object.entries(result)) {
+      fixed[k] = this.makeSingleCapturingPattern(v);
+    }
 
     return fixed;
   }
@@ -435,13 +490,5 @@ export class RegexService {
 
   private escapeRegExp(str: string): string {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
-  private autoFixPatterns(p: Record<string, string>): Record<string, string> {
-    const out: Record<string, string> = { ...p };
-    if (!out.amount) out.amount = '(\\d+(?:,\\d{3})*(?:\\.\\d{1,2})?)';
-    if (!out.currency) out.currency = '(USD|EUR|KES|NGN|GBP|\\$|€|₦|£)';
-    if (!out.date) out.date = '([0-9]{4}-[0-9]{2}-[0-9]{2}|[0-9]{2}[/-][0-9]{2}[/-][0-9]{4})';
-    return out;
   }
 }

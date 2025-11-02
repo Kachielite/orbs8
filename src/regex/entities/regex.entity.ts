@@ -10,7 +10,7 @@ import { Bank } from '../../bank/entities/bank.entity';
 
 export enum RegexCreatedBy {
   LLM = 'LLM',
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   MANUAL = 'MANUAL',
 }
 

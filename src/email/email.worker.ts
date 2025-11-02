@@ -147,6 +147,7 @@ export class EmailWorker extends WorkerHost {
         // Extract only subject and body to save tokens
         const headers = msg.payload?.headers || [];
         const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+        const fromRaw = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
 
         // Extract body from the message payload
         let bodyRaw = '';
@@ -174,13 +175,17 @@ export class EmailWorker extends WorkerHost {
         if (cleanSubject) parts.push(`Subject: ${cleanSubject}`);
         if (cleanBody) parts.push(`Body: ${cleanBody}`);
         const emailText = parts.join(' ');
-        console.log("emailText:", emailText)
+        console.log('emailText:', emailText);
 
         // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
         const internalMs = parseInt(item.internalDate, 10);
         const fallbackDate = Number.isFinite(internalMs) ? new Date(internalMs) : undefined;
 
-        await this.transactionService.create(user, emailText, { fallbackDate });
+        // Extract bank name hint from the From header (domain between @ and .com)
+        const bankHint = this.extractBankNameFromSender(fromRaw);
+        console.log('bankHint:', bankHint);
+
+        await this.transactionService.create(user, emailText, { fallbackDate, bankHint });
         syncedCount++;
 
         // Update lastSyncAt to the time of this email
@@ -522,8 +527,61 @@ export class EmailWorker extends WorkerHost {
   private normalizeWhitespace(input: string): string {
     if (!input) return '';
     // Collapse all whitespace (including newlines and tabs) into single spaces and return one line
-    return input
-      .replace(/\s+/g, ' ')
-      .trim();
+    return input.replace(/\s+/g, ' ').trim();
+  }
+
+  // Extract bank name hint from a From header value.
+  // Examples:
+  //  - "Notification <StanbicIBTC-E-Alert@stanbicibtc.com>" -> "stanbicibtc"
+  //  - "GeNS@gtbank.com" -> "gtbank"
+  //  - "-no_reply@accessbankplc.com" or "<no_reply@accessbankplc.com>" -> "accessbankplc"
+  private extractBankNameFromSender(fromRaw: string | undefined | null): string | undefined {
+    if (!fromRaw) return undefined;
+    let value = String(fromRaw).trim();
+
+    // If includes a display name with angle brackets, extract inside <...>
+    const angle = value.match(/<([^>]+)>/);
+    if (angle && angle[1]) {
+      value = angle[1];
+    }
+
+    // If multiple addresses separated by commas, use the first
+    if (value.includes(',')) value = value.split(',')[0].trim();
+
+    // Extract domain part
+    const atIdx = value.lastIndexOf('@');
+    if (atIdx === -1) return undefined;
+    let domain = value.slice(atIdx + 1).toLowerCase();
+    domain = domain.replace(/[>\s].*$/, ''); // strip anything after space or >
+
+    // Determine the primary label (bank identifier) from the domain
+    const parts = domain.split('.').filter(Boolean);
+    if (parts.length === 0) return undefined;
+
+    let label = '';
+    if (parts.length >= 3) {
+      // Handle multi-level TLDs like co.uk, com.ng, co.za, com.gh etc.
+      const last = parts[parts.length - 1];
+      const secondLast = parts[parts.length - 2];
+      const secondLevelTlds = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac']);
+      if (last.length <= 2 && secondLevelTlds.has(secondLast)) {
+        // e.g., something.co.uk => take third last
+        label = parts[parts.length - 3] || '';
+      } else {
+        // default to the second last (immediately before TLD)
+        label = secondLast || parts[0];
+      }
+    } else if (parts.length === 2) {
+      // typical domain like bank.com
+      label = parts[0];
+    } else {
+      // single label domain (rare)
+      label = parts[0];
+    }
+
+    // Keep only letters to make lookup robust (remove digits, dashes, underscores)
+    label = label.replace(/[^a-z]/g, '');
+
+    return label || undefined;
   }
 }

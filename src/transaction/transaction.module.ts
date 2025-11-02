@@ -12,6 +12,8 @@ import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
 import { User } from '../auth/entities/user.entity';
 import { ExchangeRateModule } from '../exchange-rate/exchange-rate.module';
+import { RegexModule } from '../regex/regex.module';
+import { Regex } from '../regex/entities/regex.entity';
 
 @Module({
   imports: [
@@ -23,8 +25,10 @@ import { ExchangeRateModule } from '../exchange-rate/exchange-rate.module';
       Bank,
       Account,
       User,
+      Regex,
     ]),
     ExchangeRateModule,
+    RegexModule,
   ],
   controllers: [TransactionController],
   providers: [TransactionService, OpenAIConfig, CategoryService],

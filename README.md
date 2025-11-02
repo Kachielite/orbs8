@@ -257,78 +257,115 @@ Tuning knobs
 ## Intelligent Regex Extraction System
 
 ### Overview
-The system uses a smart regex-first extraction approach that automatically learns and caches extraction patterns, reducing LLM costs by up to 95% after the first email from each bank.
+A regex-first pipeline that automatically learns, audits, and continuously re-scores extraction patterns per bank. It prioritizes deterministic parsing (fast/cheap), uses the LLM only as a fallback, and self-heals by promoting good patterns and demoting poor ones.
 
-### How It Works
+Key benefits:
+- 40–100x faster than LLM once patterns exist
+- Up to ~95% cost reduction after the first email per bank
+- Live confidence scoring and audit notes for transparency
 
-**First Email from a Bank:**
-1. Extracts transaction data using LLM (GPT-4o-mini)
-2. Automatically generates regex patterns using GPT-4o
-3. Audits patterns with GPT-4o for validation and confidence scoring
-4. Saves approved patterns (confidence ≥ 70%) for future use
-5. Marks transaction as `extractionMethod: LLM`
+### End-to-end flow
 
-**Subsequent Emails from Same Bank:**
-1. Uses saved regex patterns (instant, near-zero cost)
-2. Falls back to LLM if regex extraction fails
-3. Marks transaction as `extractionMethod: REGEX`
-4. Tracks success/failure rates for quality monitoring
-5. Auto-deactivates patterns with >30% failure rate
+1) Bank routing from sender domain (no LLM)
+- Email worker derives a `bankHint` from the `From:` header by taking the domain label between `@` and the public suffix (e.g., `StanbicIBTC-E-Alert@stanbicibtc.com` → `stanbicibtc`).
+- `TransactionService.create(...)` looks up the bank using `ILIKE` with that hint. If not found, a new bank may be created lazily.
 
-### Regex Module Components
+2) Regex-first extraction (intelligent)
+- If a bank is resolved, we try an existing active, approved regex for that bank.
+- Selection order favors better performers: `isActive DESC, confidenceScore DESC, successCount DESC, updatedAt DESC`.
+- If regex succeeds on core fields (see below), the transaction is marked `extractionMethod = REGEX` and linked to the `regexId` used.
 
-**Entity:** `src/regex/entities/regex.entity.ts`
-- Stores regex patterns per bank as JSON
-- Tracks success/failure counts and confidence scores
-- Maintains audit status (PENDING, APPROVED, REJECTED)
-- Auto-deactivation based on failure rate thresholds
+3) LLM fallback (only when needed)
+- If no regex exists or core fields are missing, the LLM (gpt‑4o‑mini) extracts structured fields.
+- For the first email(s), we also:
+  - Generate patterns (gpt‑4o)
+  - Audit patterns (gpt‑4o) → `confidenceScore`, `auditStatus`
+  - Save approved patterns (confidence ≥ 70%) for reuse
+- Future emails for that bank will be parsed via regex first.
 
-**Service:** `src/regex/regex.service.ts`
-- `findActiveRegexByBank()` — Find active regex for a bank
-- `extractWithRegex()` — Extract data using regex patterns
-- `generateRegexPattern()` — Generate regex using GPT-4o
-- `auditRegexPattern()` — Audit regex using GPT-4o
-- `createRegexPattern()` — Save audited patterns to database
+### Core-required fields logic
+Regex extraction is considered successful if and only if it captures all three “core” groups (field names are flexible; examples shown):
+- Amount: any of `amount`, `transaction_amount`, `credit_amount`, `debit_amount`
+- Reference/ID: any of `reference_number`, `transaction_reference`, `reference`, `transactionId`, `transaction_id`
+- Date: any of `transaction_date`, `transaction_date_time`, `value_date`, `date`, `value_date_time`
 
-**Transaction Integration:**
-- Added `ExtractionMethod` enum (LLM, REGEX, MANUAL) to track extraction source
-- Added `extractionMethod` column to transaction entity
-- Added nullable `regex` relation to link transactions to patterns used
-- `extractTransactionDetailsWithRegex()` method handles the intelligent routing
+All other fields in a pattern are treated as optional for the success decision. This reduces unfair rejections and improves learning velocity.
 
-### Models Used
+### Confidence scoring and audit status (live updates)
+After every regex attempt, we persist live metrics:
+- `successCount`, `failureCount`, `lastUsedAt`
+- `auditStatus` auto-promotion/demotion:
+  - Success → `APPROVED` and `isActive = true`
+  - Failure → `REJECTED`
+- `confidenceScore` is updated using Laplace-smoothed live ratio blended with prior audit score:
+  - `liveScore = round(100 * (successCount + 1) / (attempts + 2))`
+  - Blend with prior: if attempts ≥ 3, `0.7*live + 0.3*prior`; else `0.5/0.5`
+  - Clamped to `[0, 100]`
+- Auto-deactivation: after ≥ 5 attempts, if failure rate > 30%, set `isActive = false`.
 
-1. **Regex Generation:** `gpt-4o` — Creates precise, robust extraction patterns
-2. **Regex Auditing:** `gpt-4o` — Deep validation with confidence scoring (OpenAI's most advanced model)
-3. **LLM Fallback:** `gpt-4o-mini` — Fast, cost-effective extraction when regex unavailable/fails
+Audit notes are informative and machine-generated:
+- Success example: `Promoted to APPROVED after successful extraction | matched 5/7 | missingOptional: account_name`
+- Failure example: `Missing required core: amount, transaction_date | matched 2/7 | missingOptional: account_name | nonSingleCaptures: description`
 
-### Monitoring & Analytics
+### Data sanitation and fallbacks
+To keep persisted data safe and useful:
+- Amount coercion: strings like `"1,311.00 NGN"` are sanitized; if invalid/NaN, default to `0.0` and log a warning.
+- Transaction ID: placeholder/sentence-like values (e.g., "The document number is not specified.") are rejected; we fall back to a timestamp (`safeDate.toISOString()`) and log a warning.
+- Current balance: sanitized and updated on the related `Account` when present.
+- Date: we choose the first valid candidate from parsed date, Gmail internal date fallback, else `new Date()`.
 
-**Check Extraction Method Distribution:**
+### Module components
+
+Entity — `src/regex/entities/regex.entity.ts`
+- JSON `pattern` per bank, plus `patternHash` for dedup/audit reuse
+- `confidenceScore`, `successCount`, `failureCount`, `isActive`
+- `auditStatus` (`PENDING`, `APPROVED`, `REJECTED`), `auditNotes`, `lastUsedAt`
+
+Service — `src/regex/regex.service.ts`
+- `findActiveRegexByBank()` — picks the best active+approved pattern (see ordering above)
+- `extractWithRegex()` — applies patterns, enforces core fields, updates metrics, `confidenceScore`, `auditStatus`, and notes
+- `generateRegexPattern()` — creates single-capture patterns with one capturing group per field
+- `auditRegexPattern()` — validates syntax/coverage and seeds initial `confidenceScore`
+- `createRegexPattern()` — saves audited patterns
+
+Transaction integration — `src/transaction/transaction.service.ts`
+- Accepts `{ bankHint }` from Email Worker (derived from `From:`)
+- Runs regex-first extraction and then LLM enrichment only if needed
+- Applies fallbacks: transactionId timestamp, amount `0.0` if NaN, safe date selection
+- Persists `extractionMethod` and optional `regexId` on each transaction
+
+Email worker — `src/email/email.worker.ts`
+- Normalizes subject/body (HTML stripping, URL removal, whitespace)
+- Derives `bankHint` from sender domain robustly (handles `<...>`, multi-level TLDs like `com.ng`, filters to letters)
+- Passes `bankHint` and Gmail `internalDate` as fallbacks into transaction creation
+
+### Monitoring & analytics (SQL snippets)
+
+Extraction method mix:
 ```sql
 SELECT 
   extraction_method,
-  COUNT(*) as count,
-  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) as percentage
+  COUNT(*) AS count,
+  ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER(), 2) AS percentage
 FROM transaction
 GROUP BY extraction_method;
 ```
 
-**Check Regex Performance by Bank:**
+Regex performance by bank:
 ```sql
 SELECT 
-  b.name as bank_name,
+  b.name AS bank_name,
   r.success_count,
   r.failure_count,
   r.confidence_score,
   r.is_active,
-  ROUND(r.success_count * 100.0 / (r.success_count + r.failure_count), 2) as success_rate
+  ROUND(r.success_count * 100.0 / NULLIF(r.success_count + r.failure_count, 0), 2) AS success_rate
 FROM regex r
 JOIN bank b ON r.bank_id = b.id
-ORDER BY success_rate DESC;
+ORDER BY success_rate DESC NULLS LAST;
 ```
 
-**Find Banks Without Regex Patterns:**
+Banks without active patterns:
 ```sql
 SELECT b.* 
 FROM bank b
@@ -336,51 +373,42 @@ LEFT JOIN regex r ON b.id = r.bank_id AND r.is_active = true
 WHERE r.id IS NULL;
 ```
 
-**Estimate Cost Savings:**
+Estimate LLM cost avoided:
 ```sql
 SELECT 
-  COUNT(*) as regex_extractions,
-  COUNT(*) * 0.002 as estimated_cost_saved_usd
+  COUNT(*) AS regex_extractions,
+  COUNT(*) * 0.002 AS estimated_cost_saved_usd
 FROM transaction
 WHERE extraction_method = 'REGEX';
 ```
 
-### Troubleshooting
+### Troubleshooting & operations
 
-**Force Regenerate Pattern:**
+Force regenerate a pattern for a bank (disables existing patterns so next email retrains):
 ```sql
 UPDATE regex 
 SET is_active = false 
 WHERE bank_id = <bank_id>;
 ```
-Next email from that bank will generate a new pattern.
 
-**Check Pattern Details:**
+Inspect latest patterns for a bank:
 ```sql
 SELECT * FROM regex 
 WHERE bank_id = <bank_id> 
 ORDER BY created_at DESC;
 ```
 
-### Performance Metrics
+Temporarily lower confidence threshold (code): adjust the `isActive` gating in `createRegexPattern()` if you want to accept more patterns initially.
 
-- **Extraction Time:** LLM ~2-5s vs Regex ~50-100ms (40-100x faster)
-- **Cost per Extraction:** LLM ~$0.002 vs Regex ~$0.000001
-- **Success Rate Target:** Maintain >90%, auto-deactivate at <70%
+### Performance targets
+- Extraction latency: LLM ~2–5s vs Regex ~50–100ms
+- Cost per extraction: LLM ~$0.002 vs Regex ≈ $0.000001
+- Quality: Maintain >90% success rate; auto-deactivate after ≥5 attempts if failure rate > 30%
 
-### Email Processing Enhancements
-
-**Whitespace Cleaning:**
-The system reduces large whitespaces to single spaces for better extraction accuracy:
-```typescript
-// Before: "Amount:    1000.00"
-// After:  "Amount: 1000.00"
-```
-
-**LastSync Update Strategy:**
-- `lastSyncAt` is updated only when all jobs complete successfully
-- Set to current time in the `completed` event handler
-- Not updated in `failed` event to preserve accurate sync timing
+### Notes on privacy
+- We never store raw email bodies; only extracted fields and hashed IDs
+- `bankHint` is derived from the `From:` header and used only for bank routing (no PII beyond domain analysis)
+- LLM is opt-in and invoked only when deterministic parsing is ambiguous
 
 
 ## Project structure

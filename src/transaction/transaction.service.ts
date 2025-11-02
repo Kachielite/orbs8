@@ -1,10 +1,5 @@
-import {
-  ConflictException,
-  Injectable,
-  InternalServerErrorException,
-  NotFoundException,
-} from '@nestjs/common';
-import { Transaction, TransactionType } from './entities/transaction.entity';
+import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
+import { ExtractionMethod, Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, FindOptionsOrder, ILike, In, Repository } from 'typeorm';
@@ -27,12 +22,10 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
-import {
-  AccountSummaryDto,
-  TopTransactionDto,
-  TransactionSummaryDto,
-} from './dto/transaction-summary.dto';
+import { AccountSummaryDto, TopTransactionDto, TransactionSummaryDto, } from './dto/transaction-summary.dto';
 import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
+import { RegexService } from '../regex/regex.service';
+import { Regex } from '../regex/entities/regex.entity';
 
 @Injectable()
 export class TransactionService {
@@ -70,9 +63,11 @@ export class TransactionService {
     @InjectRepository(Currency) private readonly currencyRepository: Repository<Currency>,
     @InjectRepository(Bank) private readonly bankRepository: Repository<Bank>,
     @InjectRepository(Account) private readonly accountRepository: Repository<Account>,
+    @InjectRepository(Regex) private readonly regexRepository: Repository<Regex>,
     private readonly openAI: OpenAIConfig,
     private readonly categoryService: CategoryService,
     private readonly exchangeRateService: ExchangeRateService,
+    private readonly regexService: RegexService,
   ) {}
 
   async findAll(
@@ -628,12 +623,47 @@ export class TransactionService {
   async create(
     user: Partial<User>,
     emailText: string,
-    options?: { fallbackDate?: Date },
+    options?: { fallbackDate?: Date; bankHint?: string },
   ): Promise<GeneralResponseDto> {
     try {
       logger.info(`Creating transaction for user: ${user.id}`);
-      // Extract transaction details from the email
-      const transactionDetails = await this.extractTransactionDetails(emailText);
+
+      // Step 1: determine bank name from email metadata (sender), no LLM
+      const bankHint = options?.bankHint?.trim();
+      let bankEntity: Bank | null = null;
+      let bankName = bankHint || '';
+      if (bankHint) {
+        const found = await this.bankRepository.findOne({
+          where: { name: ILike(`%${bankHint}%`) },
+        });
+        if (found) {
+          bankEntity = found;
+          bankName = found.name;
+        }
+      }
+
+      // Step 2: use intelligent regex extraction system end-to-end
+      let extractionMethodUsed: ExtractionMethod = ExtractionMethod.LLM;
+      let regexUsedId: number | undefined;
+      let txData: TransactionDetails = {} as TransactionDetails;
+
+      if (bankEntity) {
+        const res = await this.regexService.extractOrGenerateRegex(emailText, bankEntity);
+        if (res.success && res.data) {
+          const sanitized = this.sanitizeRegexData(res.data);
+          txData = { ...txData, ...sanitized };
+          extractionMethodUsed = res.regexId ? ExtractionMethod.REGEX : ExtractionMethod.LLM;
+          regexUsedId = res.regexId;
+        }
+      }
+
+      // If still missing critical fields, enrich with LLM structured parser as fallback
+      const needsEnrichment = !txData.type || txData.amount == null || !txData.transactionId;
+      if (needsEnrichment) {
+        const enriched = await this.extractTransactionDetails(emailText);
+        txData = { ...enriched, ...txData };
+      }
+
       const {
         type,
         amount,
@@ -644,8 +674,7 @@ export class TransactionService {
         transactionId,
         accountNumber,
         accountName,
-        bankName,
-      } = transactionDetails;
+      } = txData;
 
       // Determine a safe transaction date (prefer parsed, else fallback, else now)
       const determineDate = (): Date => {
@@ -663,11 +692,15 @@ export class TransactionService {
       const requestOwner = await this.userRepository.findOne({ where: { id: user.id } });
       if (!requestOwner) throw new NotFoundException(`User with ID ${user.id} not found`);
 
-      // Normalize a safe transaction id (use provided transactionId or safe date)
-      const tranID = transactionId || safeDate.toISOString();
+      // Normalize a safe transaction id (reject generic/sentence-like values); fallback to timestamp
+      let tranID = (transactionId || '').toString().trim();
+      if (!tranID || this.isBadTransactionId(tranID)) {
+        logger.warn(`Falling back to timestamp transactionID due to invalid parsed ID: '${tranID || '[empty]'}'`);
+        tranID = safeDate.toISOString();
+      }
 
       // Find currency from pre-populated list (search by both code and name)
-      const currencySearch = currency?.toUpperCase() || 'USD';
+      const currencySearch = (currency || 'USD').toUpperCase();
       let currencyEntity = await this.currencyRepository
         .createQueryBuilder('currency')
         .where('UPPER(currency.code) = :search', { search: currencySearch })
@@ -676,9 +709,7 @@ export class TransactionService {
 
       if (!currencyEntity) {
         logger.warn(`Currency '${currencySearch}' not found. Defaulting to USD.`);
-        currencyEntity = await this.currencyRepository.findOne({
-          where: { code: 'USD' },
-        });
+        currencyEntity = await this.currencyRepository.findOne({ where: { code: 'USD' } });
         if (!currencyEntity) {
           throw new NotFoundException(
             `Default currency USD not found in database. Please ensure currencies are properly seeded.`,
@@ -686,16 +717,11 @@ export class TransactionService {
         }
       }
 
-      // Find or create bank
-      let bankEntity: Bank | null;
-      const bank = await this.bankRepository.findOne({
-        where: { name: ILike(bankName) },
-      });
-      if (!bank) {
-        const newBank = this.bankRepository.create({ name: bankName });
+      // Ensure we have a bank entity, default if absent
+      if (!bankEntity) {
+        const name = bankName || 'Unknown Bank';
+        const newBank = this.bankRepository.create({ name });
         bankEntity = await this.bankRepository.save(newBank);
-      } else {
-        bankEntity = bank;
       }
 
       // Find or create Account first so we can always update balance
@@ -704,28 +730,29 @@ export class TransactionService {
         relations: ['currency', 'bank', 'user'],
       });
       if (!accountEntity) {
+        const newAccountBalance = this.coerceAmount(currentBalance);
         const newAccount = this.accountRepository.create({
           accountName,
           accountNumber,
-          currentBalance,
+          currentBalance: Number.isFinite(newAccountBalance as number)
+            ? (newAccountBalance as number)
+            : 0,
           user: requestOwner,
           bank: bankEntity,
           currency: currencyEntity,
         });
         accountEntity = await this.accountRepository.save(newAccount);
       } else {
-        // Update balance (and optionally account name/bank) every time we parse an email
-        if (Number.isFinite(currentBalance)) {
-          accountEntity.currentBalance = currentBalance;
+        const maybeBal = this.coerceAmount(currentBalance);
+        if (Number.isFinite(maybeBal as number)) {
+          accountEntity.currentBalance = maybeBal as number;
         }
-        // Keep account metadata fresh if provided
         if (accountName && accountName !== accountEntity.accountName) {
           accountEntity.accountName = accountName;
         }
         if (bankEntity && (!accountEntity.bank || accountEntity.bank.id !== bankEntity.id)) {
           accountEntity.bank = bankEntity;
         }
-        // Persist changes
         await this.accountRepository.save(accountEntity);
       }
 
@@ -738,7 +765,6 @@ export class TransactionService {
         },
       });
       if (existingTransaction) {
-        // Balance already updated above when fetching/creating the account
         return new GeneralResponseDto(
           'Transaction already exists, skipping creation (balance updated)',
         );
@@ -746,19 +772,33 @@ export class TransactionService {
 
       // Find category
       const category = await this.categoryService.classifyTransaction({ description });
-      const categoryEntity = await this.categoryRepository.findOne({
-        where: { id: category.id },
-      });
+      const categoryEntity = await this.categoryRepository.findOne({ where: { id: category.id } });
+
+      // Optionally load regex entity for relation
+      const regexEntity = regexUsedId
+        ? await this.regexRepository.findOne({ where: { id: regexUsedId } })
+        : null;
+
+      // Coerce amounts safely
+      const amountNumRaw = this.coerceAmount(amount);
+      const amountNum = Number.isFinite(amountNumRaw as number) ? (amountNumRaw as number) : 0.0;
+      if (!Number.isFinite(amountNumRaw as number)) {
+        logger.warn(
+          `Amount parsed as NaN/invalid; defaulting to 0.0 (method=${extractionMethodUsed}${regexUsedId ? ", regexId=" + regexUsedId : ''})`,
+        );
+      }
 
       // Create transaction
       const newTransaction = this.transactionRepository.create({
-        amount,
+        amount: amountNum,
         type:
-          TransactionType[type.toUpperCase() as keyof typeof TransactionType] ||
+          TransactionType[type?.toUpperCase?.() as keyof typeof TransactionType] ||
           TransactionType.OTHER,
         description,
         transactionDate: safeDate,
         transactionID: tranID,
+        extractionMethod: extractionMethodUsed,
+        regex: regexEntity,
         user: requestOwner,
         category: categoryEntity!,
         account: accountEntity,
@@ -768,12 +808,12 @@ export class TransactionService {
 
       return new GeneralResponseDto(`Transaction created successfully`);
     } catch (error) {
-      logger.error(`Error creating transaction for user ${user.id}: ${error.message}`);
+      logger.error(`Error creating transaction for user ${user.id}: ${(<Error>error).message}`);
       if (error instanceof NotFoundException || error instanceof ConflictException) {
         throw error;
       }
       throw new InternalServerErrorException(
-        `Error creating transaction for user ${user.id}: ${error.message}`,
+        `Error creating transaction for user ${user.id}: ${(<Error>error).message}`,
       );
     }
   }
@@ -954,5 +994,72 @@ export class TransactionService {
       transaction.account?.bank?.id || 0,
       transaction.createdAt,
     );
+  }
+
+  private sanitizeRegexData(
+    data: NonNullable<Parameters<RegexService['extractOrGenerateRegex']>[0]> extends never
+      ? never
+      : NonNullable<
+          import('../regex/interfaces/regex-result.interface').RegexExtractionResult['data']
+        >,
+  ): Partial<TransactionDetails> {
+    const out: Partial<TransactionDetails> = {};
+    if (!data) return out;
+    if (typeof data.type === 'string') out.type = data.type;
+
+    // Amount and balance may be strings with commas/currency; sanitize
+    const amt = (data as { amount?: unknown }).amount as unknown;
+    const amtNum = this.coerceAmount(amt);
+    if (Number.isFinite(amtNum as number)) out.amount = amtNum as number;
+
+    if (typeof data.currency === 'string') out.currency = data.currency;
+    if (typeof data.date === 'string') out.date = data.date;
+    if (typeof data.description === 'string') out.description = data.description;
+
+    const bal = (data as { currentBalance?: unknown }).currentBalance as unknown;
+    const balNum = this.coerceAmount(bal);
+    if (Number.isFinite(balNum as number)) out.currentBalance = balNum as number;
+
+    if (typeof data.transactionId === 'string') out.transactionId = data.transactionId;
+    if (typeof data.accountNumber === 'string') out.accountNumber = data.accountNumber;
+    if (typeof data.accountName === 'string') out.accountName = data.accountName;
+    if (typeof data.bankName === 'string') out.bankName = data.bankName;
+    return out;
+  }
+
+  private coerceAmount(value: unknown): number | undefined {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+    if (typeof value !== 'string') return undefined;
+    const cleaned = value
+      .replace(/\s+/g, '')
+      .replace(/[,$]/g, '')
+      .replace(/[A-Za-z]/g, '')
+      .replace(/\u00A0/g, '');
+    const num = Number(cleaned);
+    return Number.isFinite(num) ? num : undefined;
+  }
+
+  private isBadTransactionId(id: string): boolean {
+    const s = (id || '').trim();
+    if (!s) return true;
+    // Too short or too long to be a reasonable ID
+    if (s.length < 6 || s.length > 80) return true;
+    const lower = s.toLowerCase();
+    // Common placeholders or sentences
+    const badPhrases = [
+      'the document number is not specified',
+      'document number',
+      'the balances on this account',
+      'the balance on this account',
+      'the balances as at',
+      'not provided',
+    ];
+    if (badPhrases.some((p) => lower.includes(p))) return true;
+    // Looks like a sentence with many spaces
+    if (/\w+\s+\w+\s+\w+/.test(s) && /[.?!]$/.test(s)) return true;
+    // Too many spaces or contains long natural-language words
+    const spaceCount = (s.match(/\s/g) || []).length;
+    if (spaceCount >= 5) return true;
+    return false;
   }
 }

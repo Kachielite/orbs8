@@ -10,6 +10,7 @@ import { User } from '../../auth/entities/user.entity';
 import { Category } from '../../category/entities/category.entity';
 import { Currency } from '../../currency/entities/currency.entity';
 import { Account } from '../../account/entities/account.entity';
+import { Regex } from '../../regex/entities/regex.entity';
 
 export enum TransactionType {
   DEBIT = 'debit',
@@ -20,6 +21,13 @@ export enum TransactionType {
   WITHDRAWAL = 'withdrawal',
   REVERSAL = 'reversal',
   OTHER = 'other',
+}
+
+// New: Track extraction method
+export enum ExtractionMethod {
+  LLM = 'LLM',
+  REGEX = 'REGEX',
+  MANUAL = 'MANUAL',
 }
 
 @Entity()
@@ -45,6 +53,13 @@ export class Transaction {
 
   @Column()
   transactionDate: Date;
+
+  // New: extraction method and optional regex reference
+  @Column({ type: 'enum', enum: ExtractionMethod, default: ExtractionMethod.LLM })
+  extractionMethod: ExtractionMethod;
+
+  @ManyToOne(() => Regex, { nullable: true, onDelete: 'SET NULL' })
+  regex?: Regex | null;
 
   @CreateDateColumn()
   createdAt: Date;
