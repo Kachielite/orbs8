@@ -85,7 +85,7 @@ export class EmailWorker extends WorkerHost {
 
       // Check last sync time
       const lastSyncTime = emailEntity.lastSyncAt;
-      let queryTimeBack = `newer_than:30d`;
+      let queryTimeBack = `newer_than:120d`;
 
       if (lastSyncTime) {
         // Gmail expects 'after:' in YYYY/MM/DD format (per search grammar). Use UTC date to avoid TZ issues.

@@ -8,8 +8,6 @@ import { currencyConverter } from '../common/utils/currency-converter.util';
 @Injectable()
 export class ExchangeRateService {
   private readonly logger = new Logger(ExchangeRateService.name);
-  private readonly HOUR_WINDOWS = [6, 12, 18];
-  private readonly WINDOW_MINUTES = 15; // 15-minute window
 
   constructor(
     @InjectRepository(ExchangeRate)
@@ -41,14 +39,10 @@ export class ExchangeRateService {
   // Exposed method for other modules to get the latest known rate for a pair.
 
   // It updates all known pairs. Failures for individual pairs are recorded by setting wasUpdated=false.
-  @Cron('*/60 * * * *')
+  @Cron('0 6,12,18 * * *')
   async handleScheduledUpdate(): Promise<void> {
     try {
-      if (!this.isWithinUpdateWindow()) {
-        return;
-      }
-
-      this.logger.debug('ExchangeRate scheduled update running within update window');
+      this.logger.debug('ExchangeRate scheduled update running');
 
       const records = await this.exchangeRateRepository.find();
 
@@ -78,15 +72,7 @@ export class ExchangeRateService {
     }
   }
 
-  // Determines if now is within the scheduled update window
-  private isWithinUpdateWindow(date: Date = new Date()): boolean {
-    const now = date;
-    const currentHour = now.getHours();
-    const currentMinutes = now.getMinutes();
-    return this.HOUR_WINDOWS.some((h) => currentHour === h && currentMinutes < this.WINDOW_MINUTES);
-  }
-
-  // Cron job runs every 5 minutes and performs updates only during the configured windows.
+  // Cron job runs at 6:00, 12:00, and 18:00 daily to update exchange rates.
 
   // Fetch from upstream with retries and exponential backoff
   private async fetchRateWithRetries(from: string, to: string, retries = 2): Promise<number> {
