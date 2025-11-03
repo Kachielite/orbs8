@@ -12,6 +12,7 @@ import { Account } from '../account/entities/account.entity';
 import { Transaction as TransactionEntity } from '../transaction/entities/transaction.entity';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { StatusDto } from './dto/status.dto';
 
 @Injectable()
 export class EmailService {
@@ -294,9 +295,9 @@ export class EmailService {
       await this.userRepository.update({ id: user.id }, { emailLinked: false });
 
       // Delete transactions associated with the user
-      await this.transactionRepository.delete({ userId: user.id });
+      await this.transactionRepository.delete({ user: { id: user.id } as User });
       // Delete accounts associated with the user
-      await this.accountRepository.delete({ userId: user.id });
+      await this.accountRepository.delete({ user: { id: user.id } as User });
 
       logger.info(`Gmail access revoked successfully for user: ${user.id}`);
 
