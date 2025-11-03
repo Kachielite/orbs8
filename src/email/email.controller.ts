@@ -5,7 +5,14 @@ import { JwtGuard } from '../auth/guards/jwt.guard';
 import { User } from '../auth/entities/user.entity';
 import { GeneralResponseDto } from '../common/dto/general-response.dto';
 import { StatusDto } from './dto/status.dto';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags, } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiBody,
+  ApiOperation,
+  ApiQuery,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 
 @ApiTags('Email Management')
 @ApiBearerAuth()

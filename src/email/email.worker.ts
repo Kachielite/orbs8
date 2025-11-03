@@ -175,7 +175,6 @@ export class EmailWorker extends WorkerHost {
         if (cleanSubject) parts.push(`Subject: ${cleanSubject}`);
         if (cleanBody) parts.push(`Body: ${cleanBody}`);
         const emailText = parts.join(' ');
-        console.log('emailText:', emailText);
 
         // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
         const internalMs = parseInt(item.internalDate, 10);
@@ -183,7 +182,6 @@ export class EmailWorker extends WorkerHost {
 
         // Extract bank name hint from the From header (domain between @ and .com)
         const bankHint = this.extractBankNameFromSender(fromRaw);
-        console.log('bankHint:', bankHint);
 
         await this.transactionService.create(user, emailText, { fallbackDate, bankHint });
         syncedCount++;
