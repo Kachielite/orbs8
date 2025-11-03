@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ExchangeRate } from '../account/entities/exchange-rate.entity';
@@ -38,8 +37,9 @@ export class ExchangeRateService {
 
   // Exposed method for other modules to get the latest known rate for a pair.
 
+  // TODO: fix this scheduled job
   // It updates all known pairs. Failures for individual pairs are recorded by setting wasUpdated=false.
-  @Cron('0 6,12,18 * * *')
+  // @Cron('0 6,*,* * * *')
   async handleScheduledUpdate(): Promise<void> {
     try {
       this.logger.debug('ExchangeRate scheduled update running');
