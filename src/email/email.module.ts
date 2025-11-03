@@ -18,6 +18,7 @@ import { EmailGateway } from './email.gateway';
 import { Notification } from '../notification/entities/notification.entity';
 import { NotificationModule } from '../notification/notification.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { Transaction } from '../transaction/entities/transaction.entity';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { ScheduleModule } from '@nestjs/schedule';
       Account,
       Currency,
       Notification,
+      Transaction,
     ]),
     TransactionModule,
     BullModule.registerQueue({ name: 'email-sync' }),

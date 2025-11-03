@@ -85,7 +85,7 @@ export class EmailWorker extends WorkerHost {
 
       // Check last sync time
       const lastSyncTime = emailEntity.lastSyncAt;
-      let queryTimeBack = `newer_than:90d`;
+      let queryTimeBack = `newer_than:120d`;
 
       if (lastSyncTime) {
         // Gmail expects 'after:' in YYYY/MM/DD format (per search grammar). Use UTC date to avoid TZ issues.
@@ -147,6 +147,7 @@ export class EmailWorker extends WorkerHost {
         // Extract only subject and body to save tokens
         const headers = msg.payload?.headers || [];
         const subjectRaw = headers.find((h) => h.name?.toLowerCase() === 'subject')?.value || '';
+        const fromRaw = headers.find((h) => h.name?.toLowerCase() === 'from')?.value || '';
 
         // Extract body from the message payload
         let bodyRaw = '';
@@ -165,19 +166,31 @@ export class EmailWorker extends WorkerHost {
           }
         }
 
-        // Normalize whitespace: trim and replace multiple spaces/newlines with single space
-        const subject = subjectRaw.trim().replace(/\s+/g, ' ');
-        const body = bodyRaw.trim().replace(/\s+/g, ' ');
+        // Sanitize subject and body: remove HTML, URLs, footer/signatures, fwd/reply headers, and normalize whitespace
+        const cleanSubject = this.sanitizeSubject(subjectRaw);
+        const cleanBody = this.sanitizeEmailBody(bodyRaw);
 
-        // Create a minimal email text with just subject and body
-        const emailText = `Subject: ${subject}\n\nBody:\n${body}`;
+        // Create a minimal, single-line email text with subject and body back-to-back
+        const parts: string[] = [];
+        if (cleanSubject) parts.push(`Subject: ${cleanSubject}`);
+        if (cleanBody) parts.push(`Body: ${cleanBody}`);
+        const emailText = parts.join(' ');
 
         // Use Gmail internalDate as a safe fallback if the LLM-provided date is invalid
         const internalMs = parseInt(item.internalDate, 10);
         const fallbackDate = Number.isFinite(internalMs) ? new Date(internalMs) : undefined;
 
-        await this.transactionService.create(user, emailText, { fallbackDate });
+        // Extract bank name hint from the From header (domain between @ and .com)
+        const bankHint = this.extractBankNameFromSender(fromRaw);
+
+        await this.transactionService.create(user, emailText, { fallbackDate, bankHint });
         syncedCount++;
+
+        // Update lastSyncAt to the time of this email
+        const { emailEntity: currentEmailEntity } = await this.findUserAndEmail(userId);
+        currentEmailEntity.lastSyncAt = fallbackDate || new Date();
+        await this.emailRepository.save(currentEmailEntity);
+
         const progress = Math.round(((fullMessages.indexOf(item) + 1) / jobProgress) * 100);
         await job.updateProgress(progress);
       }
@@ -271,7 +284,6 @@ export class EmailWorker extends WorkerHost {
     } else if (type === 'failed') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.FAILED;
       userDetails.emailEntity.failedReason = job.returnvalue as string;
-      userDetails.emailEntity.lastSyncAt = new Date();
       await this.emailRepository.save(userDetails.emailEntity);
 
       // Extract sync stats from the error if it's an EmailSyncError
@@ -395,5 +407,179 @@ export class EmailWorker extends WorkerHost {
       throw new BadRequestException(`Email credentials not found for user ${userId}`);
     }
     return { user, emailEntity };
+  }
+
+  // --- Sanitization helpers ---
+  private sanitizeSubject(input: string): string {
+    return this.normalizeWhitespace(this.stripUrls(this.stripHtml(input)));
+  }
+
+  private sanitizeEmailBody(raw: string): string {
+    // 1) convert HTML -> text
+    let text = this.stripHtml(raw);
+    // 2) remove URLs
+    text = this.stripUrls(text);
+    // 3) remove forwarded/replied headers embedded in body
+    text = this.removeForwardHeaders(text);
+    // 4) remove email signatures/footers
+    text = this.stripFootersAndSignatures(text);
+    // 5) normalize whitespace
+    text = this.normalizeWhitespace(text);
+    return text;
+  }
+
+  private stripHtml(input: string): string {
+    if (!input) return '';
+    let s = input;
+    // remove script/style blocks
+    s = s.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+    s = s.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    // replace <br> and closing block tags with newlines to retain structure
+    s = s.replace(/<(br|br\s*\/|\/p|\/div|\/li)\s*\/?>/gi, '\n');
+    // turn list items into lines
+    s = s.replace(/<li[^>]*>/gi, '- ');
+    // strip remaining tags
+    s = s.replace(/<[^>]+>/g, ' ');
+    // decode a few common HTML entities
+    s = s
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'");
+    return s;
+  }
+
+  private stripUrls(input: string): string {
+    if (!input) return '';
+    // remove http/https, www, and mailto links
+    return input.replace(/\b(?:https?:\/\/|www\.)\S+|\bmailto:\S+/gi, ' ');
+  }
+
+  private removeForwardHeaders(input: string): string {
+    if (!input) return '';
+    const headerNames = [
+      'from',
+      'to',
+      'cc',
+      'bcc',
+      'date',
+      'subject',
+      'sent',
+      'mailed-by',
+      'reply-to',
+      'message-id',
+      'content-type',
+      'received',
+      'dkim-signature',
+    ];
+    const headerRe = new RegExp(String.raw`^\s*(?:>+\s*)?(?:${headerNames.join('|')})\s*:`, 'i');
+    const lines = input.split(/\r?\n/);
+
+    // Remove obvious forward separators blocks and header lines
+    const filtered = lines.filter((line) => {
+      const isForwardSep =
+        /^\s*-{2,}\s*forwarded message\s*-{2,}\s*$/i.test(line) ||
+        /^\s*begin forwarded message\s*:?\s*$/i.test(line) ||
+        /^\s*on .+ wrote:\s*$/i.test(line);
+      if (isForwardSep) return false;
+      return !headerRe.test(line);
+    });
+
+    return filtered.join('\n');
+  }
+
+  private stripFootersAndSignatures(input: string): string {
+    if (!input) return '';
+    const lines = input.split(/\r?\n/);
+
+    // Common signature/footer markers
+    const markers: RegExp[] = [
+      /^\s*--\s*$/, // signature delimiter
+      /^\s*sent from my /i,
+      /^\s*best( regards)?\s*[,.-]*\s*$/i,
+      /^\s*regards\s*[,.-]*\s*$/i,
+      /^\s*kind regards\s*[,.-]*\s*$/i,
+      /^\s*thanks( a lot| so much)?\s*[,.-]*\s*$/i,
+      /^\s*thank you\s*[,.-]*\s*$/i,
+      /^\s*cheers\s*[,.-]*\s*$/i,
+      /^\s*sincerely\s*[,.-]*\s*$/i,
+      /^\s*yours (faithfully|truly)\s*[,.-]*\s*$/i,
+      /^\s*this email (and any attachments )?is confidential/i,
+      /^\s*do not reply/i,
+      /^\s*unsubscribe\b/i,
+    ];
+
+    // Walk from bottom and cut at the first marker found
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (markers.some((re) => re.test(line))) {
+        return lines.slice(0, i).join('\n');
+      }
+    }
+
+    return input;
+  }
+
+  private normalizeWhitespace(input: string): string {
+    if (!input) return '';
+    // Collapse all whitespace (including newlines and tabs) into single spaces and return one line
+    return input.replace(/\s+/g, ' ').trim();
+  }
+
+  // Extract bank name hint from a From header value.
+  // Examples:
+  //  - "Notification <StanbicIBTC-E-Alert@stanbicibtc.com>" -> "stanbicibtc"
+  //  - "GeNS@gtbank.com" -> "gtbank"
+  //  - "-no_reply@accessbankplc.com" or "<no_reply@accessbankplc.com>" -> "accessbankplc"
+  private extractBankNameFromSender(fromRaw: string | undefined | null): string | undefined {
+    if (!fromRaw) return undefined;
+    let value = String(fromRaw).trim();
+
+    // If includes a display name with angle brackets, extract inside <...>
+    const angle = value.match(/<([^>]+)>/);
+    if (angle && angle[1]) {
+      value = angle[1];
+    }
+
+    // If multiple addresses separated by commas, use the first
+    if (value.includes(',')) value = value.split(',')[0].trim();
+
+    // Extract domain part
+    const atIdx = value.lastIndexOf('@');
+    if (atIdx === -1) return undefined;
+    let domain = value.slice(atIdx + 1).toLowerCase();
+    domain = domain.replace(/[>\s].*$/, ''); // strip anything after space or >
+
+    // Determine the primary label (bank identifier) from the domain
+    const parts = domain.split('.').filter(Boolean);
+    if (parts.length === 0) return undefined;
+
+    let label = '';
+    if (parts.length >= 3) {
+      // Handle multi-level TLDs like co.uk, com.ng, co.za, com.gh etc.
+      const last = parts[parts.length - 1];
+      const secondLast = parts[parts.length - 2];
+      const secondLevelTlds = new Set(['co', 'com', 'org', 'net', 'gov', 'edu', 'ac']);
+      if (last.length <= 2 && secondLevelTlds.has(secondLast)) {
+        // e.g., something.co.uk => take third last
+        label = parts[parts.length - 3] || '';
+      } else {
+        // default to the second last (immediately before TLD)
+        label = secondLast || parts[0];
+      }
+    } else if (parts.length === 2) {
+      // typical domain like bank.com
+      label = parts[0];
+    } else {
+      // single label domain (rare)
+      label = parts[0];
+    }
+
+    // Keep only letters to make lookup robust (remove digits, dashes, underscores)
+    label = label.replace(/[^a-z]/g, '');
+
+    return label || undefined;
   }
 }

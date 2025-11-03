@@ -23,6 +23,8 @@ import { MailService } from '../mail/mail.service';
 import { Token } from '../tokens/entities/token.entity';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyPasswordTokenDto } from './dto/verify-password-token.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
+import { Currency } from '../currency/entities/currency.entity';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +32,7 @@ export class AuthService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Token) private readonly tokenRepository: Repository<Token>,
+    @InjectRepository(Currency) private readonly currencyRepository: Repository<Currency>,
     private readonly jwtService: JwtService,
     private readonly mailService: MailService,
   ) {}
@@ -301,6 +304,63 @@ export class AuthService {
       }
       logger.error(`Error fetching user with ID ${id}: ${error.message}`);
       throw new InternalServerErrorException('An error occurred while fetching user');
+    }
+  }
+
+  async updateUser(request: UpdateUserDto, user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Updating user with ID: ${user.id}`);
+      const existingUser = await this.userRepository.findOne({ where: { id: user.id } });
+      if (!existingUser) {
+        logger.error(`User with ID ${user.id} not found`);
+        throw new NotFoundException(`User with ID ${user.id} not found`);
+      }
+
+      if (request.oldPassword && request.newPassword) {
+        logger.info(`Updating password for user with ID: ${user.id}`);
+        if (!existingUser.password) {
+          logger.error(`User with ID ${user.id} does not have a password set`);
+          throw new ForbiddenException('User does not have a password set');
+        }
+        // Check the old password is correct
+        const validateOldPassword = await bcrypt.compare(
+          request.oldPassword,
+          existingUser.password,
+        );
+
+        if (!validateOldPassword) {
+          logger.error(`Old password does not match for user with ID ${user.id}`);
+          throw new ForbiddenException('Old password is incorrect');
+        }
+        // Hash new password
+        const hashedNewPassword = await this.hashPassword(request.newPassword);
+        existingUser.password = hashedNewPassword;
+      }
+
+      if (request.name) {
+        existingUser.name = request.name;
+      }
+
+      if (request.preferredCurrency) {
+        const newCurrency = await this.currencyRepository.findOne({
+          where: { code: request.preferredCurrency },
+        });
+        if (!newCurrency) {
+          logger.error(`Currency with code ${request.preferredCurrency} not found`);
+          throw new NotFoundException(`Currency with code ${request.preferredCurrency} not found`);
+        }
+        existingUser.preferredCurrency = newCurrency?.code;
+      }
+
+      await this.userRepository.save(existingUser);
+      logger.info(`User with ID ${user.id} updated successfully`);
+      return new GeneralResponseDto('User updated successfully');
+    } catch (error) {
+      if (error instanceof NotFoundException || error instanceof ForbiddenException) {
+        throw error;
+      }
+      logger.error(`Error updating user with ID ${user.id}: ${error.message}`);
+      throw new InternalServerErrorException('An error occurred while updating user');
     }
   }
 

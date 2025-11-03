@@ -17,6 +17,17 @@ export class OpenAIConfig {
   getLLM(): ChatOpenAI {
     return this.llm;
   }
+
+  getChatModel(model: string): ChatOpenAI {
+    // O1 models and some future models don't support custom temperature
+    const supportsTemperature = !model.startsWith('o1-');
+
+    return new ChatOpenAI({
+      apiKey: envConstants.OPENAI_API_KEY,
+      model,
+      ...(supportsTemperature ? { temperature: 0.7 } : {}),
+    });
+  }
 }
 
 @Module({

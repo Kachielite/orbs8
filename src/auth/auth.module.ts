@@ -8,9 +8,10 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { MailService } from '../mail/mail.service';
 import { Token } from '../tokens/entities/token.entity';
 import { MailModule } from '../mail/mail.module';
+import { Currency } from '../currency/entities/currency.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Token]), JwtModule.register({}), MailModule],
+  imports: [TypeOrmModule.forFeature([User, Token, Currency]), JwtModule.register({}), MailModule],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy, MailService],
   exports: [AuthService],

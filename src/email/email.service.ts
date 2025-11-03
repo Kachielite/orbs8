@@ -8,9 +8,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Email, EmailProvider, EmailSyncStatus } from './entities/email.entity';
 import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../auth/entities/user.entity';
-import { StatusDto } from './dto/status.dto';
+import { Account } from '../account/entities/account.entity';
+import { Transaction as TransactionEntity } from '../transaction/entities/transaction.entity';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { StatusDto } from './dto/status.dto';
 
 @Injectable()
 export class EmailService {
@@ -26,6 +28,10 @@ export class EmailService {
     private readonly emailRepository: Repository<Email>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(TransactionEntity)
+    private readonly transactionRepository: Repository<TransactionEntity>,
+    @InjectRepository(Account)
+    private readonly accountRepository: Repository<Account>,
     @InjectQueue('email-sync') private readonly emailSyncQueue: any,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
@@ -257,6 +263,49 @@ export class EmailService {
       throw new BadRequestException(
         `Failed to verify access to the email label. Please ensure the label exists in Gmail and the spelling matches exactly.`,
       );
+    }
+  }
+
+  async revokeEmailAccessAndDeleteTransactions(user: Partial<User>): Promise<GeneralResponseDto> {
+    try {
+      logger.info(`Revoking access for user: ${user.id}`);
+      const emailEntity = await this.emailRepository.findOne({
+        where: { user: { id: user.id } as User },
+        relations: ['user'],
+      });
+      if (!emailEntity) {
+        throw new BadRequestException('Email not linked');
+      }
+
+      // Attempt to revoke the access token with Google
+      try {
+        await this.oauth2Client.revokeToken(emailEntity.accessToken);
+      } catch (revokeError) {
+        const revokeMessage =
+          revokeError instanceof Error ? revokeError.message : String(revokeError);
+        logger.warn(
+          `Failed to revoke Gmail token for user ${user.id}: ${revokeMessage}. Proceeding to delete local records.`,
+        );
+      }
+
+      // Delete email records from database
+      await this.emailRepository.delete({ user: { id: user.id } as User });
+
+      // Update user's emailLinked status
+      await this.userRepository.update({ id: user.id }, { emailLinked: false });
+
+      // Delete transactions associated with the user
+      await this.transactionRepository.delete({ user: { id: user.id } as User });
+      // Delete accounts associated with the user
+      await this.accountRepository.delete({ user: { id: user.id } as User });
+
+      logger.info(`Gmail access revoked successfully for user: ${user.id}`);
+
+      return new GeneralResponseDto('Gmail access revoked successfully');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to revoke Gmail access: ${message}`);
+      throw new InternalServerErrorException(`Failed to revoke Gmail access: ${message}`);
     }
   }
 

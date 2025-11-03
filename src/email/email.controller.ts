@@ -275,4 +275,64 @@ export class EmailController {
   ): Promise<GeneralResponseDto> {
     return await this.emailService.verifyAccessToEmailLabel(user, labelName);
   }
+
+  @Post('revoke-access')
+  @ApiOperation({
+    summary: 'Revoke Gmail access and delete transactions',
+    description:
+      'Revokes Gmail access token, removes email integration, and deletes all associated transactions and accounts.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Gmail access successfully revoked and data cleaned up',
+    type: GeneralResponseDto,
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Gmail access revoked successfully' },
+        success: { type: 'boolean', example: true },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad Request - Email not linked',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 400 },
+        message: { type: 'string', example: 'Email not linked' },
+        error: { type: 'string', example: 'Bad Request' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token is missing or invalid',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 401 },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'Unauthorized' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error while revoking access',
+    schema: {
+      type: 'object',
+      properties: {
+        statusCode: { type: 'number', example: 500 },
+        message: { type: 'string', example: 'Failed to revoke Gmail access' },
+        error: { type: 'string', example: 'Internal Server Error' },
+      },
+    },
+  })
+  async revokeEmailAccessAndDeleteTransactions(
+    @CurrentUser() user: Partial<User>,
+  ): Promise<GeneralResponseDto> {
+    return await this.emailService.revokeEmailAccessAndDeleteTransactions(user);
+  }
 }
