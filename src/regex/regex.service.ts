@@ -152,7 +152,9 @@ export class RegexService {
 
       // Determine presence of core groups required for a "successful" extraction
       const hasAny = (obj: Record<string, unknown>, keys: string[]) =>
-        keys.some((k) => typeof obj[k] === 'string' ? String(obj[k]).trim().length > 0 : obj[k] != null);
+        keys.some((k) =>
+          typeof obj[k] === 'string' ? String(obj[k]).trim().length > 0 : obj[k] != null,
+        );
       const amountKeys = ['amount', 'transaction_amount', 'credit_amount', 'debit_amount'];
       const refKeys = [
         'reference_number',
@@ -218,14 +220,18 @@ export class RegexService {
         regex.failureCount += 1;
         // Demote to REJECTED with concise notes
         regex.auditStatus = RegexAuditStatus.REJECTED;
-        const nonSingle = withBadCaptures.length ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}` : '';
+        const nonSingle = withBadCaptures.length
+          ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}`
+          : '';
         regex.auditNotes = `Missing required core: ${missingRequired.join(', ')} | matched ${matchedFields.length}/${totalFields}${missingOptional.length ? ` | missingOptional: ${missingOptional.join(', ')}` : ''}${nonSingle}`;
       } else {
         regex.successCount += 1;
         // Promote to APPROVED on any full success; keep active
         regex.auditStatus = RegexAuditStatus.APPROVED;
         regex.isActive = true;
-        const nonSingle = withBadCaptures.length ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}` : '';
+        const nonSingle = withBadCaptures.length
+          ? ` | nonSingleCaptures: ${withBadCaptures.join(', ')}`
+          : '';
         regex.auditNotes = `Promoted to APPROVED after successful extraction | matched ${matchedFields.length}/${totalFields}${missingOptional.length ? ` | missingOptional: ${missingOptional.join(', ')}` : ''}${nonSingle}`;
       }
 

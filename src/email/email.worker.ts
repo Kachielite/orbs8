@@ -45,6 +45,11 @@ export class EmailWorker extends WorkerHost {
       const userId = (job.data as JobPayloadInterface).userId;
       const labelName = (job.data as JobPayloadInterface).labelName;
 
+      if (!userId) {
+        logger.error(`Invalid userId in job data for job ${job.id}: ${JSON.stringify(job.data)}`);
+        throw new BadRequestException('Invalid userId in job data');
+      }
+
       logger.info(
         `Start job ${job.id} for user: ${userId} to sync emails with label: ${labelName}`,
       );
@@ -232,6 +237,10 @@ export class EmailWorker extends WorkerHost {
 
   private async handleEvents(job: Job, type: 'active' | 'progress' | 'completed' | 'failed') {
     const userId = (job.data as JobPayloadInterface).userId;
+    if (!userId) {
+      logger.error(`Invalid userId in job data for job ${job.id}: ${JSON.stringify(job.data)}`);
+      return;
+    }
     const userDetails = await this.findUserAndEmail(userId);
 
     if (type === 'active') {

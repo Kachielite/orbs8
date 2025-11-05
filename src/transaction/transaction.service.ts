@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, InternalServerErrorException, NotFoundException, } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ExtractionMethod, Transaction, TransactionType } from './entities/transaction.entity';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -22,7 +27,11 @@ import { Currency } from '../currency/entities/currency.entity';
 import { Bank } from '../bank/entities/bank.entity';
 import { Account } from '../account/entities/account.entity';
 import { CategoryService } from '../category/category.service';
-import { AccountSummaryDto, TopTransactionDto, TransactionSummaryDto, } from './dto/transaction-summary.dto';
+import {
+  AccountSummaryDto,
+  TopTransactionDto,
+  TransactionSummaryDto,
+} from './dto/transaction-summary.dto';
 import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
 import { RegexService } from '../regex/regex.service';
 import { Regex } from '../regex/entities/regex.entity';
@@ -695,7 +704,9 @@ export class TransactionService {
       // Normalize a safe transaction id (reject generic/sentence-like values); fallback to timestamp
       let tranID = (transactionId || '').toString().trim();
       if (!tranID || this.isBadTransactionId(tranID)) {
-        logger.warn(`Falling back to timestamp transactionID due to invalid parsed ID: '${tranID || '[empty]'}'`);
+        logger.warn(
+          `Falling back to timestamp transactionID due to invalid parsed ID: '${tranID || '[empty]'}'`,
+        );
         tranID = safeDate.toISOString();
       }
 
@@ -784,7 +795,7 @@ export class TransactionService {
       const amountNum = Number.isFinite(amountNumRaw as number) ? (amountNumRaw as number) : 0.0;
       if (!Number.isFinite(amountNumRaw as number)) {
         logger.warn(
-          `Amount parsed as NaN/invalid; defaulting to 0.0 (method=${extractionMethodUsed}${regexUsedId ? ", regexId=" + regexUsedId : ''})`,
+          `Amount parsed as NaN/invalid; defaulting to 0.0 (method=${extractionMethodUsed}${regexUsedId ? ', regexId=' + regexUsedId : ''})`,
         );
       }
 
@@ -1008,7 +1019,7 @@ export class TransactionService {
     if (typeof data.type === 'string') out.type = data.type;
 
     // Amount and balance may be strings with commas/currency; sanitize
-    const amt = (data as { amount?: unknown }).amount as unknown;
+    const amt = (data as { amount?: unknown }).amount;
     const amtNum = this.coerceAmount(amt);
     if (Number.isFinite(amtNum as number)) out.amount = amtNum as number;
 
@@ -1016,7 +1027,7 @@ export class TransactionService {
     if (typeof data.date === 'string') out.date = data.date;
     if (typeof data.description === 'string') out.description = data.description;
 
-    const bal = (data as { currentBalance?: unknown }).currentBalance as unknown;
+    const bal = (data as { currentBalance?: unknown }).currentBalance;
     const balNum = this.coerceAmount(bal);
     if (Number.isFinite(balNum as number)) out.currentBalance = balNum as number;
 
