@@ -16,6 +16,7 @@ import { LangSmithModule } from '../langsmith/langsmith.module';
 import { OpenAIModule } from '../common/configurations/openai.config';
 import { NotificationModule } from '../notification/notification.module';
 import { BankModule } from '../bank/bank.module';
+import { CurrencyModule } from '../currency/currency.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { BankModule } from '../bank/bank.module';
     OpenAIModule,
     NotificationModule,
     BankModule,
+    CurrencyModule,
   ],
   controllers: [AppController],
   providers: [AppService],
