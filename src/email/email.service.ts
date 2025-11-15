@@ -83,10 +83,12 @@ export class EmailService {
         existingEmail.expiresAt = expiresAtValue!;
         existingEmail.lastSyncAt = new Date();
 
-        // Only update refresh token if Google provided a new one
+        // Only update both token if Google provided a new one
         // Otherwise, keep the existing refresh token
         if (accessData.tokens.refresh_token) {
           existingEmail.refreshToken = accessData.tokens.refresh_token;
+          existingEmail.accessToken = accessData.tokens.access_token;
+
           logger.info(`New refresh token provided for user ${user.id}`);
         } else {
           logger.info(`Reusing existing refresh token for user ${user.id}`);
