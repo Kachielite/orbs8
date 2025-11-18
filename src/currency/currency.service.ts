@@ -14,10 +14,16 @@ export class CurrencyService {
   async getAllCurrencies(): Promise<CurrencyDto[]> {
     logger.info('Fetching all currencies from the database');
 
-    const currencies = await this.currencyRepository.find();
+    const currencies = await this.currencyRepository.find({
+      order: { name: 'ASC' }
+    });
 
-    return currencies.map((c: Currency) => {
-      return new CurrencyDto(c.id, c.code, c.name, c.symbol);
+    const uniqueCurrencies = Array.from(
+      new Map(currencies.map(c => [c.code, c])).values()
+    );
+
+    return uniqueCurrencies.map((c: Currency) => {
+      return new CurrencyDto(c.id, c.name, c.symbol, c.code);
     });
   }
 }
