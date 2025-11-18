@@ -150,7 +150,12 @@ export class EmailService {
         return new StatusDto(EmailSyncStatus.IDLE);
       }
 
-      return new StatusDto(source.syncStatus, source.emailsReceived, source.lastSyncAt);
+      return new StatusDto(
+        source.syncStatus,
+        source.emailsReceived,
+        source.lastSyncAt,
+        source.labelName,
+      );
     } catch (error) {
       logger.error(`Failed to get sync status: ${error.message}`);
       throw new InternalServerErrorException(`Failed to get sync status: ${error.message}`);
