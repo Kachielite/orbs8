@@ -54,8 +54,38 @@ export class EmailWorker extends WorkerHost {
         `Start job ${job.id} for user: ${userId} to sync emails with label: ${labelName}`,
       );
 
-      // 1. Find the user entity first to get the correct type for TypeORM
-      const { user, emailEntity: initialEmailEntity } = await this.findUserAndEmail(userId);
+      // Attempt to locate user & email credentials
+      let user: User | null = null;
+      let initialEmailEntity: Email | null = null;
+      try {
+        const details = await this.findUserAndEmail(userId);
+        user = details.user;
+        initialEmailEntity = details.emailEntity;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes('Email credentials not found')) {
+          // User exists but has revoked / deleted email credentials. Mark state & notify, then exit gracefully.
+          user = await this.userRepository.findOne({ where: { id: userId } });
+          if (user) {
+            await this.userRepository.update({ id: userId }, { emailLinked: false });
+          }
+          logger.warn(`Email creds missing for user ${userId}. Skipping sync job ${job.id}.`);
+          await this.notificationService.createAndEmit(
+            'Email sync skipped',
+            'Your email account is disconnected. Please reconnect to resume syncing.',
+            NotificationType.SYNC_FAILED,
+            userId,
+          );
+          return { syncedCount: 0, totalEmails: 0, results: [] };
+        }
+        throw err; // rethrow other errors
+      }
+
+      if (!user || !initialEmailEntity) {
+        // Defensive check; should be covered above.
+        logger.warn(`Missing user or email entity after retrieval for user ${userId}. Aborting.`);
+        return { syncedCount: 0, totalEmails: 0, results: [] };
+      }
 
       // 2. Check if token needs refresh and refresh if necessary
       const emailEntity = await this.ensureValidToken(initialEmailEntity, userId);
@@ -206,7 +236,7 @@ export class EmailWorker extends WorkerHost {
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : 'Unknown error occurred';
       logger.error(`Email worker process error: ${errorMessage}`, e);
-      // Return sync stats even on failure
+      // If it's an intentional skip due to missing credentials we already returned earlier.
       throw new EmailSyncError(errorMessage, syncedCount, totalEmails);
     }
   }
@@ -241,7 +271,32 @@ export class EmailWorker extends WorkerHost {
       logger.error(`Invalid userId in job data for job ${job.id}: ${JSON.stringify(job.data)}`);
       return;
     }
-    const userDetails = await this.findUserAndEmail(userId);
+
+    let userDetails: { user: User; emailEntity: Email } | null = null;
+    try {
+      userDetails = await this.findUserAndEmail(userId);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('Email credentials not found')) {
+        // Mark user emailLinked false and emit a one-time notification if attempting sync without creds
+        await this.userRepository.update({ id: userId }, { emailLinked: false });
+        logger.warn(`Skipping '${type}' event handling for user ${userId} due to missing email creds.`);
+        if (type === 'active') {
+          await this.notificationService.createAndEmit(
+            'Email sync skipped',
+            'Your email account is disconnected. Please reconnect to resume syncing.',
+            NotificationType.SYNC_FAILED,
+            userId,
+          );
+        }
+        return; // Exit gracefully
+      }
+      // Other errors should be logged and aborted without throwing to avoid crashing the worker
+      logger.error(`Failed to handle '${type}' event for job ${job.id}: ${message}`);
+      return;
+    }
+
+    if (!userDetails) return; // Safety
 
     if (type === 'active') {
       userDetails.emailEntity.syncStatus = EmailSyncStatus.IN_PROGRESS;

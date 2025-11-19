@@ -48,6 +48,7 @@ export class EmailService {
         access_type: 'offline',
         scope: this.SCOPES,
         prompt: 'consent',
+        include_granted_scopes: true, // ensure incremental auth keeps prior grants
       });
     } catch (error) {
       logger.error(`Failed to get auth url: ${error.message}`);
@@ -63,6 +64,30 @@ export class EmailService {
       // Validate that we got at least an access token
       if (!accessData.tokens.access_token) {
         throw new BadRequestException('Failed to obtain access token from Google');
+      }
+
+      // Validate scopes via token introspection to be reliable
+      let scopes: string[] = [];
+      try {
+        const info = await this.oauth2Client.getTokenInfo(accessData.tokens.access_token);
+        scopes = Array.isArray(info.scopes) ? info.scopes : [];
+      } catch (introspectErr) {
+        // Fall back to tokens.scope if tokeninfo fails
+        scopes = (accessData.tokens.scope || '').split(/[\s,]+/).filter(Boolean);
+        logger.warn(
+          `Token introspection failed; falling back to tokens.scope. Reason: ${
+            introspectErr instanceof Error ? introspectErr.message : String(introspectErr)
+          }`,
+        );
+      }
+
+      logger.info(`Granted OAuth scopes for user ${user.id}: ${scopes.join(', ')}`);
+      const requiredScope = 'https://www.googleapis.com/auth/gmail.readonly';
+      if (!scopes.includes(requiredScope)) {
+        logger.warn(`Gmail scope missing for user ${user.id}. Granted: ${scopes.join(', ')}`);
+        throw new BadRequestException(
+          'Google did not grant Gmail permission. Please reauthorize and allow Gmail access.',
+        );
       }
 
       // Check if email tokens already exist for the user
@@ -233,6 +258,35 @@ export class EmailService {
         await this.refreshGmailAccessToken(user.id as number, emailEntity);
       }
 
+      // Verify scopes on the current access token to prevent 403 later
+      try {
+        const info = await this.oauth2Client.getTokenInfo(emailEntity.accessToken);
+        const scopes = Array.isArray(info.scopes) ? info.scopes : [];
+        const requiredScope = 'https://www.googleapis.com/auth/gmail.readonly';
+        if (!scopes.includes(requiredScope)) {
+          await this.userRepository.update({ id: user.id }, { emailLinked: false });
+          await this.emailRepository.update(
+            { user: { id: user.id } as User },
+            {
+              syncStatus: EmailSyncStatus.FAILED,
+              failedReason:
+                'Insufficient Gmail permission. Please reconnect and allow Gmail access to continue.',
+            },
+          );
+          logger.warn(`Access token for user ${user.id} lacks gmail.readonly scope.`);
+          throw new BadRequestException(
+            'Insufficient Gmail permission. Please reconnect and allow Gmail access to continue.',
+          );
+        }
+      } catch (tiErr) {
+        // If tokeninfo fails, allow Gmail call to surface precise error which is handled below
+        logger.warn(
+          `Token info check failed for user ${user.id}: ${
+            tiErr instanceof Error ? tiErr.message : String(tiErr)
+          }`,
+        );
+      }
+
       const gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
       // Verify access to the email account
       await gmail.users.getProfile({ userId: 'me' });
@@ -264,6 +318,24 @@ export class EmailService {
         );
         throw new BadRequestException(
           'Gmail access has been revoked. Please reconnect your email account.',
+        );
+      }
+      if (message.toLowerCase().includes('insufficient authentication scopes')) {
+        // Mark as disconnected and instruct user to re-consent with Gmail scope
+        await this.userRepository.update({ id: user.id }, { emailLinked: false });
+        await this.emailRepository.update(
+          { user: { id: user.id } as User },
+          {
+            syncStatus: EmailSyncStatus.FAILED,
+            failedReason:
+              'Insufficient Gmail permission. Please reconnect and allow Gmail access to continue.',
+          },
+        );
+        logger.warn(
+          `Insufficient scopes for user ${user.id}. Ask user to reconnect with Gmail permission.`,
+        );
+        throw new BadRequestException(
+          'Insufficient Gmail permission. Please reconnect and allow Gmail access to continue.',
         );
       }
       logger.error(`Failed to verify access to email label: ${message}`);
@@ -316,6 +388,27 @@ export class EmailService {
     }
   }
 
+  async getGrantedScopes(user: Partial<User>): Promise<string[]> {
+    const emailEntity = await this.emailRepository.findOne({
+      where: { user: { id: user.id } as User },
+      relations: ['user'],
+    });
+    if (!emailEntity?.accessToken) {
+      throw new BadRequestException('Email not linked or no access token available');
+    }
+
+    try {
+      const info = await this.oauth2Client.getTokenInfo(emailEntity.accessToken);
+      const scopes = Array.isArray(info.scopes) ? info.scopes : [];
+      logger.info(`Granted OAuth scopes for user ${user.id}: ${scopes.join(', ')}`);
+      return scopes;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.warn(`Failed to introspect token for user ${user.id}: ${message}`);
+      throw new BadRequestException('Unable to read token scopes. Please reconnect your email.');
+    }
+  }
+
   @Cron(CronExpression.EVERY_HOUR)
   async scheduledSync() {
     logger.info('Scheduled sync started');
@@ -331,76 +424,57 @@ export class EmailService {
         await this.updateSyncStatus(user, EmailSyncStatus.PENDING);
         await this.emailSyncQueue.add('sync-emails', { userId: user.id, labelName });
         logger.info(`Scheduled sync queued for user: ${user.id}`);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        await this.updateSyncStatus(user, EmailSyncStatus.FAILED, message);
-        logger.error(`Failed to queue scheduled sync for user ${user.id}: ${message}`);
-        throw new InternalServerErrorException(
-          `Failed to queue scheduled sync for user ${user.id}: ${message}`,
-        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`Scheduled sync error for user ${user.id}: ${message}`);
       }
     }
     logger.info('Scheduled sync completed');
   }
 
-  public async refreshGmailAccessToken(userId: number, emailEntity: Email) {
+  private async refreshGmailAccessToken(userId: number, emailEntity: Email) {
     try {
       this.oauth2Client.setCredentials({
-        refresh_token: emailEntity.refreshToken,
+        refresh_token: emailEntity.refreshToken || undefined,
       });
 
       const { credentials } = await this.oauth2Client.refreshAccessToken();
 
-      // Update local copy
-      emailEntity.accessToken = credentials.access_token ?? emailEntity.accessToken;
+      // Update access token and expiry
+      if (credentials.access_token) {
+        emailEntity.accessToken = credentials.access_token;
+      }
       if (credentials.expiry_date) {
         emailEntity.expiresAt = new Date(credentials.expiry_date);
       }
       if (credentials.refresh_token) {
-        // Occasionally Google rotates refresh tokens; store new one if provided
         emailEntity.refreshToken = credentials.refresh_token;
       }
 
       await this.emailRepository.save(emailEntity);
-
-      // Reapply updated credentials
-      this.oauth2Client.setCredentials({
-        access_token: emailEntity.accessToken,
-        refresh_token: emailEntity.refreshToken,
-        expiry_date: emailEntity.expiresAt ? emailEntity.expiresAt.getTime() : undefined,
-      });
-
-      logger.info(`✅ Refreshed Gmail token successfully for user ${userId}`);
-      return emailEntity;
+      logger.info(`✅ Gmail access token refreshed successfully for user ${userId}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      logger.error(`❌ Failed to refresh Gmail token for user ${userId}: ${message}`);
-
-      // When refresh token becomes invalid — must reauthorize
-      if (message.includes('invalid_grant')) {
-        throw new BadRequestException(
-          'Gmail connection expired or revoked. Please reconnect your email account.',
-        );
-      }
-
-      throw new BadRequestException('Failed to refresh Gmail token.');
+      logger.error(`Failed to refresh Gmail access token for user ${userId}: ${message}`);
+      throw new InternalServerErrorException(`Failed to refresh Gmail access token: ${message}`);
     }
   }
 
-  private async updateSyncStatus(
-    user: User,
-    status: EmailSyncStatus,
-    failedReason?: string,
-  ): Promise<void> {
-    const emailEntity = await this.emailRepository.findOne({
-      where: { user: { id: user.id } as User },
-      relations: ['user'],
-    });
-    if (emailEntity) {
-      emailEntity.syncStatus = status;
-      emailEntity.failedReason = failedReason ?? null;
-      await this.emailRepository.save(emailEntity);
+  private async updateSyncStatus(user: User, status: EmailSyncStatus, failedReason?: string) {
+    try {
+      const update: any = {
+        syncStatus: status,
+        failedReason: failedReason || null,
+      };
+      if (status !== EmailSyncStatus.IDLE) {
+        update.lastSyncAt = new Date();
+      }
+      await this.emailRepository.update({ user: { id: user.id } as User }, update);
+      logger.info(`Sync status updated to ${status} for user ${user.id}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Failed to update sync status for user ${user.id}: ${message}`);
+      throw new InternalServerErrorException(`Failed to update sync status: ${message}`);
     }
-    return;
   }
 }
